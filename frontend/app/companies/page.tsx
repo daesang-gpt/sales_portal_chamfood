@@ -1,330 +1,353 @@
 "use client"
 
-import { useState } from "react"
-import { Search, Plus, Building2, Phone, MapPin, Calendar, DollarSign, Eye, Edit } from "lucide-react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Search, Plus, Eye, Building2, Phone, Loader2, ChevronLeft, ChevronRight } from "lucide-react"
 import Link from "next/link"
+import { companyApi, Company, CompanyFilters, PaginatedResponse } from "@/lib/api"
 
-// 샘플 회사 데이터
-const sampleCompanies = [
-  {
-    id: 1,
-    name: "아이더스에프앤비",
-    code: "C0000126",
-    sapCode: "1114755",
-    smCode: "62538",
-    type: "프랜차이즈",
-    industry: "축육(가공장)",
-    ceo: "김대표",
-    address: "서울시 강남구 테헤란로 123",
-    phone: "02-1234-5678",
-    manager: "이담당",
-    managerPhone: "010-1234-5678",
-    establishedDate: "2015-03-15",
-    contractDate: "2025-04-02",
-    paymentTerms: "15일단위 마감, 30일이내, 현금결제",
-    customerType: "기존",
-    website: "www.aidersf.co.kr",
-    monthlySales: 150000000,
-    lastContact: "2025-01-07",
-    status: "활성",
-  },
-  {
-    id: 2,
-    name: "(주)사세",
-    code: "C0000127",
-    sapCode: "1114756",
-    smCode: "62539",
-    type: "가공장",
-    industry: "축육(가공장)",
-    ceo: "박대표",
-    address: "충북 청주시 흥덕구 산업로 456",
-    phone: "043-534-0900",
-    manager: "최담당",
-    managerPhone: "010-2345-6789",
-    establishedDate: "2010-08-20",
-    contractDate: "2023-01-15",
-    paymentTerms: "월말 마감, 45일이내, 어음결제",
-    customerType: "기존",
-    website: "",
-    monthlySales: 89000000,
-    lastContact: "2025-01-06",
-    status: "활성",
-  },
-  {
-    id: 3,
-    name: "푸라닭 본사",
-    code: "C0000128",
-    sapCode: "1114757",
-    smCode: "62540",
-    type: "프랜차이즈",
-    industry: "외식업",
-    ceo: "정대표",
-    address: "서울시 송파구 올림픽로 789",
-    phone: "02-3456-7890",
-    manager: "김매니저",
-    managerPhone: "010-3456-7890",
-    establishedDate: "2018-05-10",
-    contractDate: "2024-11-20",
-    paymentTerms: "15일단위 마감, 30일이내, 현금결제",
-    customerType: "신규",
-    website: "www.puradak.co.kr",
-    monthlySales: 320000000,
-    lastContact: "2025-01-05",
-    status: "활성",
-  },
-  {
-    id: 4,
-    name: "움버거",
-    code: "C0000129",
-    sapCode: "1114758",
-    smCode: "62541",
-    type: "프랜차이즈",
-    industry: "외식업",
-    ceo: "한대표",
-    address: "서울시 마포구 홍대로 321",
-    phone: "02-4567-8901",
-    manager: "이팀장",
-    managerPhone: "010-4567-8901",
-    establishedDate: "2020-12-01",
-    contractDate: "2024-08-15",
-    paymentTerms: "월말 마감, 30일이내, 현금결제",
-    customerType: "신규",
-    website: "www.umburger.co.kr",
-    monthlySales: 45000000,
-    lastContact: "2025-01-04",
-    status: "활성",
-  },
-]
-
-export default function CompaniesListPage() {
-  const [searchTerm, setSearchTerm] = useState("")
-  const [filterType, setFilterType] = useState("all")
-  const [filterStatus, setFilterStatus] = useState("all")
-
-  const filteredCompanies = sampleCompanies.filter((company) => {
-    const matchesSearch =
-      company.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      company.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      company.industry.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesType = filterType === "all" || company.type === filterType
-    const matchesStatus = filterStatus === "all" || company.status === filterStatus
-
-    return matchesSearch && matchesType && matchesStatus
+export default function CompaniesPage() {
+  const [companies, setCompanies] = useState<Company[]>([])
+  const [stats, setStats] = useState({
+    total: 0,
+    newCustomers: 0,
+    existingCustomers: 0,
+    thisMonthNew: 0
   })
+  const [searchTerm, setSearchTerm] = useState("")
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+
+  // 데이터 로드
+  const loadData = async (page: number = 1) => {
+    try {
+      setLoading(true)
+      setError(null)
+      
+      // 회사 목록과 통계를 병렬로 로드
+      const [companiesData, statsData] = await Promise.all([
+        companyApi.getCompanies({ search: searchTerm }, page),
+        companyApi.getCompanyStats()
+      ])
+      
+      setCompanies(companiesData.results)
+      setTotalCount(companiesData.count)
+      setTotalPages(Math.ceil(companiesData.count / 10))
+      setStats(statsData)
+    } catch (err) {
+      setError('데이터를 불러오는 중 오류가 발생했습니다.')
+      console.error('Error loading companies:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // 통계 데이터만 별도로 로드
+  const loadStats = async () => {
+    try {
+      const statsData = await companyApi.getCompanyStats()
+      setStats(statsData)
+    } catch (err) {
+      console.error('Error loading stats:', err)
+    }
+  }
+
+  // 초기 로드
+  useEffect(() => {
+    loadData(currentPage)
+  }, [])
+
+  // 페이지 변경 시 회사 목록만 로드
+  useEffect(() => {
+    if (currentPage > 1) {
+      const loadCompaniesOnly = async () => {
+        try {
+          setLoading(true)
+          setError(null)
+          
+          const companiesData = await companyApi.getCompanies({ search: searchTerm }, currentPage)
+          
+          setCompanies(companiesData.results)
+          setTotalCount(companiesData.count)
+          setTotalPages(Math.ceil(companiesData.count / 10))
+        } catch (err) {
+          setError('데이터를 불러오는 중 오류가 발생했습니다.')
+          console.error('Error loading companies:', err)
+        } finally {
+          setLoading(false)
+        }
+      }
+      
+      loadCompaniesOnly()
+    }
+  }, [currentPage, searchTerm])
+
+  // 검색어 변경 시 데이터 다시 로드 (통계는 제외)
+  useEffect(() => {
+    const timeoutId = setTimeout(async () => {
+      setCurrentPage(1) // 검색 시 첫 페이지로 이동
+      try {
+        setLoading(true)
+        setError(null)
+        
+        // 검색 시에는 회사 목록만 로드하고 통계는 유지
+        const companiesData = await companyApi.getCompanies({ search: searchTerm }, 1)
+        
+        setCompanies(companiesData.results)
+        setTotalCount(companiesData.count)
+        setTotalPages(Math.ceil(companiesData.count / 10))
+      } catch (err) {
+        setError('데이터를 불러오는 중 오류가 발생했습니다.')
+        console.error('Error loading companies:', err)
+      } finally {
+        setLoading(false)
+      }
+    }, 500) // 500ms 디바운스
+
+    return () => clearTimeout(timeoutId)
+  }, [searchTerm])
+
+  // 데이터 매핑 헬퍼 함수
+  const getCompanyDisplayName = (company: Company) => {
+    return company.company_name || 'Unknown Company'
+  }
+
+  const getCompanyCode = (company: Company) => {
+    return company.sales_diary_company_code || '-'
+  }
+
+  const getCompanyType = (company: Company) => {
+    return company.company_type || '-'
+  }
+
+  const getCompanyRepresentative = (company: Company) => {
+    return company.ceo_name || '-'
+  }
+
+  const getCompanyContact = (company: Company) => {
+    return company.main_phone || company.contact_phone || '-'
+  }
+
+  const getCompanyCustomerType = (company: Company) => {
+    return company.customer_classification || '-'
+  }
+
+  const getCompanyStartDate = (company: Company) => {
+    return company.transaction_start_date || '-'
+  }
+
+  if (loading && companies.length === 0) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="flex items-center space-x-2">
+          <Loader2 className="h-6 w-6 animate-spin" />
+          <span>데이터를 불러오는 중...</span>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <p className="text-red-500 mb-4">{error}</p>
+          <Button onClick={() => loadData(currentPage)}>다시 시도</Button>
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-6">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">회사 관리</h1>
-              <p className="text-gray-600">거래처 및 고객사 정보 관리</p>
-            </div>
-            <div className="flex items-center space-x-4">
-              <Link href="/">
-                <Button variant="outline">대시보드</Button>
-              </Link>
-              <Button>
-                <Plus className="h-4 w-4 mr-2" />
-                회사 등록
-              </Button>
-            </div>
-          </div>
-        </div>
-      </header>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold">회사 관리</h1>
+        <Button asChild>
+          <Link href="/companies/new">
+            <Plus className="mr-2 h-4 w-4" />
+            회사 등록
+          </Link>
+        </Button>
+      </div>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* 통계 카드 */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">전체 회사</p>
-                  <p className="text-2xl font-bold">{sampleCompanies.length}</p>
-                </div>
-                <Building2 className="h-8 w-8 text-blue-500" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">활성 거래처</p>
-                  <p className="text-2xl font-bold">{sampleCompanies.filter((c) => c.status === "활성").length}</p>
-                </div>
-                <Badge className="bg-green-100 text-green-800">활성</Badge>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">신규 고객</p>
-                  <p className="text-2xl font-bold">
-                    {sampleCompanies.filter((c) => c.customerType === "신규").length}
-                  </p>
-                </div>
-                <Badge className="bg-blue-100 text-blue-800">신규</Badge>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600">월 평균 매출</p>
-                  <p className="text-2xl font-bold">
-                    {Math.round(
-                      (sampleCompanies.reduce((sum, c) => sum + c.monthlySales, 0) /
-                        sampleCompanies.length /
-                        100000000) *
-                        10,
-                    ) / 10}
-                    억
-                  </p>
-                </div>
-                <DollarSign className="h-8 w-8 text-green-500" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* 검색 및 필터 */}
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Search className="h-5 w-5" />
-              검색 및 필터
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="md:col-span-2">
-                <Input
-                  placeholder="회사명, 회사코드, 업종으로 검색..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full"
-                />
-              </div>
-              <Select value={filterType} onValueChange={setFilterType}>
-                <SelectTrigger>
-                  <SelectValue placeholder="회사 유형" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">전체</SelectItem>
-                  <SelectItem value="가공장">가공장</SelectItem>
-                  <SelectItem value="프랜차이즈">프랜차이즈</SelectItem>
-                  <SelectItem value="도소매">도소매</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select value={filterStatus} onValueChange={setFilterStatus}>
-                <SelectTrigger>
-                  <SelectValue placeholder="상태" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">전체</SelectItem>
-                  <SelectItem value="활성">활성</SelectItem>
-                  <SelectItem value="비활성">비활성</SelectItem>
-                  <SelectItem value="보류">보류</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* 회사 목록 */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
-          <CardHeader>
-            <div className="flex justify-between items-center">
-              <div>
-                <CardTitle>회사 목록</CardTitle>
-                <CardDescription>총 {filteredCompanies.length}개 회사</CardDescription>
-              </div>
-            </div>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">총 등록 회사</CardTitle>
+            <Building2 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {filteredCompanies.map((company) => (
-                <div key={company.id} className="border rounded-lg p-6 hover:bg-gray-50 transition-colors">
-                  <div className="flex justify-between items-start mb-4">
-                    <div className="flex items-center space-x-4">
-                      <div>
-                        <h3 className="font-semibold text-xl">{company.name}</h3>
-                        <div className="flex items-center space-x-2 mt-1">
-                          <span className="text-sm text-gray-500">코드: {company.code}</span>
-                          <span className="text-sm text-gray-500">SAP: {company.sapCode}</span>
-                        </div>
-                      </div>
-                      <Badge variant={company.type === "프랜차이즈" ? "default" : "secondary"}>{company.type}</Badge>
-                      <Badge variant="outline" className="border-green-500 text-green-700">
-                        {company.status}
-                      </Badge>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <Link href={`/companies/${company.id}`}>
-                        <Button variant="outline" size="sm">
-                          <Eye className="h-4 w-4 mr-1" />
-                          상세
-                        </Button>
-                      </Link>
-                      <Button variant="outline" size="sm">
-                        <Edit className="h-4 w-4 mr-1" />
-                        수정
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-                    <div className="flex items-center text-sm text-gray-600">
-                      <Building2 className="h-4 w-4 mr-2" />
-                      {company.industry}
-                    </div>
-                    <div className="flex items-center text-sm text-gray-600">
-                      <Phone className="h-4 w-4 mr-2" />
-                      {company.phone}
-                    </div>
-                    <div className="flex items-center text-sm text-gray-600">
-                      <MapPin className="h-4 w-4 mr-2" />
-                      {company.address.split(" ").slice(0, 2).join(" ")}
-                    </div>
-                    <div className="flex items-center text-sm text-gray-600">
-                      <Calendar className="h-4 w-4 mr-2" />
-                      계약: {company.contractDate}
-                    </div>
-                  </div>
-
-                  <div className="flex justify-between items-center">
-                    <div className="flex items-center space-x-4">
-                      <div className="text-sm">
-                        <span className="text-gray-500">담당자:</span>
-                        <span className="ml-1 font-medium">{company.manager}</span>
-                      </div>
-                      <div className="text-sm">
-                        <span className="text-gray-500">월 매출:</span>
-                        <span className="ml-1 font-medium text-blue-600">
-                          {(company.monthlySales / 100000000).toFixed(1)}억원
-                        </span>
-                      </div>
-                    </div>
-                    <div className="text-xs text-gray-500">최근 연락: {company.lastContact}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <div className="text-2xl font-bold">{stats.total}개사</div>
           </CardContent>
         </Card>
-      </main>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">신규 고객사</CardTitle>
+            <Badge className="h-4 w-4" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.newCustomers}개사</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">기존 고객사</CardTitle>
+            <Badge variant="secondary" className="h-4 w-4" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.existingCustomers}개사</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">이번 달 신규</CardTitle>
+            <Plus className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.thisMonthNew}개사</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>회사 목록</CardTitle>
+          <CardDescription>등록된 회사 정보를 확인하고 관리할 수 있습니다.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center space-x-2 mb-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="회사명 또는 회사코드로 검색..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-8"
+              />
+            </div>
+            {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+          </div>
+
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>회사명</TableHead>
+                <TableHead>회사코드</TableHead>
+                <TableHead>기업형태</TableHead>
+                <TableHead>대표자</TableHead>
+                <TableHead>연락처</TableHead>
+                <TableHead>고객구분</TableHead>
+                <TableHead>거래개시일</TableHead>
+                <TableHead>작업</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {companies.map((company) => (
+                <TableRow key={company.id}>
+                  <TableCell className="font-medium">
+                    {getCompanyDisplayName(company)}
+                  </TableCell>
+                  <TableCell>{getCompanyCode(company)}</TableCell>
+                  <TableCell>{getCompanyType(company)}</TableCell>
+                  <TableCell>{getCompanyRepresentative(company)}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center space-x-1">
+                      <Phone className="h-3 w-3" />
+                      <span className="text-sm">{getCompanyContact(company)}</span>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={getCompanyCustomerType(company) === "신규" ? "default" : "secondary"}>
+                      {getCompanyCustomerType(company)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>{getCompanyStartDate(company)}</TableCell>
+                  <TableCell>
+                    <Button variant="ghost" size="sm" asChild>
+                      <Link href={`/companies/${company.id}`}>
+                        <Eye className="h-4 w-4" />
+                      </Link>
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          
+          {companies.length === 0 && !loading && (
+            <div className="text-center py-8 text-muted-foreground">
+              검색 결과가 없습니다.
+            </div>
+          )}
+
+          {/* 페이지네이션 */}
+          {companies.length > 0 && (
+            <div className="flex items-center justify-between mt-6">
+              <div className="text-sm text-muted-foreground">
+                총 {totalCount}개의 회사 중 {(currentPage - 1) * 10 + 1}-{Math.min(currentPage * 10, totalCount)}번째
+              </div>
+              <div className="flex items-center space-x-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  이전
+                </Button>
+                
+                <div className="flex items-center space-x-1">
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    let pageNum;
+                    if (totalPages <= 5) {
+                      pageNum = i + 1;
+                    } else if (currentPage <= 3) {
+                      pageNum = i + 1;
+                    } else if (currentPage >= totalPages - 2) {
+                      pageNum = totalPages - 4 + i;
+                    } else {
+                      pageNum = currentPage - 2 + i;
+                    }
+                    
+                    return (
+                      <Button
+                        key={pageNum}
+                        variant={currentPage === pageNum ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => setCurrentPage(pageNum)}
+                        className="w-8 h-8 p-0"
+                      >
+                        {pageNum}
+                      </Button>
+                    );
+                  })}
+                </div>
+                
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages}
+                >
+                  다음
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }
