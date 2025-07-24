@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useParams, useRouter } from "next/navigation"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -11,10 +11,23 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Loader2, Save, ArrowLeft } from "lucide-react"
 import Link from "next/link"
 import { salesReportApi, companyApi, SalesReport, Company } from "@/lib/api"
+import dynamic from "next/dynamic"
+import { fetchRecommendedTags } from '@/lib/api'
+
+// CompanySearchInput을 클라이언트에서만 로드
+const CompanySearchInput = dynamic(
+  () => import("@/components/ui/company-search-input").then(mod => ({ default: mod.CompanySearchInput })),
+  { 
+    ssr: false,
+    loading: () => <Input placeholder="로딩 중..." disabled required />
+  }
+)
 
 export default function EditSalesReportPage() {
   const params = useParams()
   const router = useRouter()
+  const searchParams = useSearchParams();
+  const page = searchParams.get("page") || "1";
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -22,7 +35,7 @@ export default function EditSalesReportPage() {
   const [companiesLoading, setCompaniesLoading] = useState(true)
   const [formData, setFormData] = useState({
     company: "",
-    company_obj: undefined as number | undefined,
+    company_obj: undefined as number | null | undefined,
     type: "",
     location: "",
     products: "",
@@ -30,6 +43,7 @@ export default function EditSalesReportPage() {
     tags: "",
     visitDate: "",
   })
+  const [tagLoading, setTagLoading] = useState(false)
 
   useEffect(() => {
     fetchCompanies()
@@ -41,7 +55,7 @@ export default function EditSalesReportPage() {
     try {
       setCompaniesLoading(true)
       const data = await companyApi.getCompanies()
-      setCompanies(data)
+      setCompanies(data.results) // 반드시 .results로 배열만 저장
     } catch (err) {
       // 무시
     } finally {
@@ -55,7 +69,7 @@ export default function EditSalesReportPage() {
       setError(null)
       const report = await salesReportApi.getReport(Number(params.id))
       setFormData({
-        company: report.company,
+        company: report.company_display, // 회사명으로 표시
         company_obj: report.company_obj,
         type: report.type,
         location: report.location,
@@ -75,19 +89,12 @@ export default function EditSalesReportPage() {
     setFormData((prev) => ({ ...prev, [field]: value }))
   }
 
-  const handleCompanySelect = (companyId: string) => {
-    if (companyId === 'new') {
-      setFormData(prev => ({ ...prev, company: "", company_obj: undefined }))
-    } else {
-      const selectedCompany = companies.find(c => c.id.toString() === companyId)
-      if (selectedCompany) {
-        setFormData(prev => ({
-          ...prev,
-          company: selectedCompany.company_name,
-          company_obj: selectedCompany.id
-        }))
-      }
-    }
+  const handleCompanyChange = (companyName: string, companyId?: number) => {
+    setFormData(prev => ({ 
+      ...prev, 
+      company: companyName, 
+      company_obj: companyId 
+    }))
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -96,17 +103,52 @@ export default function EditSalesReportPage() {
       setError('방문일자를 입력해주세요.')
       return
     }
+    setSaving(true)
+    setError(null)
+    let companyId = formData.company_obj
     try {
-      setSaving(true)
-      setError(null)
-      await salesReportApi.updateReport(Number(params.id), formData)
-      router.push(`/sales-reports/${params.id}`)
+      // 저장 시점에 회사 id가 없으면 자동 등록
+      if (!companyId && formData.company) {
+        try {
+          const company = await companyApi.autoCreateCompany(formData.company)
+          companyId = company.id
+        } catch (err) {
+          setError('회사 자동 등록에 실패했습니다.')
+          setSaving(false)
+          return
+        }
+      }
+      const submitData = { 
+        ...formData, 
+        company_obj: companyId || null,
+        visitDate: formData.visitDate // 날짜 형식 확인
+      }
+      console.log('제출 데이터:', submitData)
+      await salesReportApi.updateReport(Number(params.id), submitData)
+      router.push(`/sales-reports/${params.id}?page=${page}`)
     } catch (err) {
       setError('영업일지 수정 중 오류가 발생했습니다.')
     } finally {
       setSaving(false)
     }
   }
+
+  // 추천 태그 추출 핸들러
+  const handleRecommendTags = async () => {
+    if (!formData.content.trim()) {
+      setError('미팅 내용을 먼저 입력해주세요.');
+      return;
+    }
+    setTagLoading(true);
+    try {
+      const tags = await fetchRecommendedTags(formData.content);
+      setFormData((prev) => ({ ...prev, tags: tags.join(', ') }));
+    } catch (err) {
+      setError('추천 태그 추출에 실패했습니다.');
+    } finally {
+      setTagLoading(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -122,7 +164,7 @@ export default function EditSalesReportPage() {
       <div className="space-y-6">
         <div className="flex items-center space-x-4">
           <Button variant="outline" size="sm" asChild>
-            <Link href={`/sales-reports/${params.id}`}>
+            <Link href={`/sales-reports/${params.id}?page=${page}`}>
               <ArrowLeft className="mr-2 h-4 w-4" />
               상세로
             </Link>
@@ -142,7 +184,7 @@ export default function EditSalesReportPage() {
     <div className="space-y-6">
       <div className="flex items-center space-x-4">
         <Button variant="outline" size="sm" asChild>
-          <Link href={`/sales-reports/${params.id}`}>
+          <Link href={`/sales-reports/${params.id}?page=${page}`}>
             <ArrowLeft className="mr-2 h-4 w-4" />
             상세로
           </Link>
@@ -166,34 +208,14 @@ export default function EditSalesReportPage() {
                   required
                 />
               </div>
+              {/* 회사명 입력: CompanySearchInput으로 교체 */}
               <div className="space-y-2">
-                <Label>회사 선택</Label>
-                <Select onValueChange={handleCompanySelect} value={formData.company_obj ? String(formData.company_obj) : 'new'}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="회사를 선택하거나 신규 입력" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="new">신규 회사 입력</SelectItem>
-                    {companiesLoading ? (
-                      <SelectItem value="" disabled>로딩 중...</SelectItem>
-                    ) : (
-                      companies.map((company) => (
-                        <SelectItem key={company.id} value={company.id.toString()}>
-                          {company.company_name}
-                        </SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="company">회사명</Label>
-                <Input
-                  id="company"
+                <Label>회사명</Label>
+                <CompanySearchInput
                   value={formData.company}
-                  onChange={e => handleInputChange("company", e.target.value)}
-                  placeholder="회사명을 입력하세요"
-                  required
+                  selectedCompanyId={formData.company_obj ?? undefined}
+                  onChange={handleCompanyChange}
+                  placeholder="회사명을 입력하거나 선택하세요"
                 />
               </div>
               <div className="space-y-2">
@@ -247,7 +269,13 @@ export default function EditSalesReportPage() {
                 />
               </div>
               <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="tags">태그 (키워드)</Label>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="tags">태그 (키워드)</Label>
+                  <Button type="button" variant="secondary" size="sm" onClick={handleRecommendTags} disabled={tagLoading}>
+                    {tagLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    키워드 추출
+                  </Button>
+                </div>
                 <Input
                   id="tags"
                   value={formData.tags}
@@ -258,7 +286,7 @@ export default function EditSalesReportPage() {
             </div>
             <div className="flex justify-end space-x-4">
               <Button type="button" variant="outline" asChild disabled={saving}>
-                <Link href={`/sales-reports/${params.id}`}>취소</Link>
+                <Link href={`/sales-reports/${params.id}?page=${page}`}>취소</Link>
               </Button>
               <Button type="submit" disabled={saving}>
                 {saving ? (

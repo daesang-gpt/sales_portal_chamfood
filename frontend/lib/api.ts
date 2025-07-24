@@ -9,7 +9,7 @@ export interface SalesReport {
   team_display: string;  // 표시용 팀명
   visitDate: string;
   company: string;
-  company_obj?: number;  // Company ID (선택사항)
+  company_obj?: number | null;  // Company ID (선택사항)
   company_display: string;  // 표시용 회사명
   type: string;
   location: string;
@@ -67,10 +67,34 @@ async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<
   if (!response.ok) {
     console.error(`API 호출 실패: ${response.status} - ${endpoint}`);
     console.error('Response:', response);
-    throw new Error(`API 호출 실패: ${response.status} - ${endpoint}`);
+    
+    // 응답 본문을 읽어서 더 자세한 오류 정보 제공
+    try {
+      const errorData = await response.json();
+      console.error('Error details:', errorData);
+      throw new Error(`API 호출 실패: ${response.status} - ${endpoint}\n${JSON.stringify(errorData, null, 2)}`);
+    } catch (parseError) {
+      throw new Error(`API 호출 실패: ${response.status} - ${endpoint}`);
+    }
   }
   
-  return response.json();
+  // DELETE 요청의 경우 빈 응답이므로 JSON 파싱을 시도하지 않음
+  if (options.method === 'DELETE') {
+    return undefined as T;
+  }
+  
+  // 응답이 비어있는 경우 빈 객체 반환
+  const text = await response.text();
+  if (!text) {
+    return undefined as T;
+  }
+  
+  try {
+    return JSON.parse(text);
+  } catch (parseError) {
+    console.error('JSON 파싱 오류:', parseError);
+    throw new Error(`응답 파싱 실패: ${endpoint}`);
+  }
 }
 
 // 페이지네이션 응답 타입
@@ -84,10 +108,13 @@ export interface PaginatedResponse<T> {
 // 영업일지 관련 API
 export const salesReportApi = {
   // 영업일지 목록 조회 (페이지네이션 지원)
-  getReports: (page?: number): Promise<PaginatedResponse<SalesReport>> => {
+  getReports: (page?: number, ordering?: string): Promise<PaginatedResponse<SalesReport>> => {
     const params = new URLSearchParams();
     if (page) {
       params.append('page', page.toString());
+    }
+    if (ordering) {
+      params.append('ordering', ordering);
     }
     const queryString = params.toString() ? `?${params.toString()}` : '';
     return apiCall<PaginatedResponse<SalesReport>>(`/reports/${queryString}`);
@@ -99,7 +126,16 @@ export const salesReportApi = {
   },
 
   // 영업일지 생성
-  createReport: (data: Omit<SalesReport, 'id' | 'createdAt' | 'author' | 'author_name' | 'author_department' | 'team'>): Promise<SalesReport> => {
+  createReport: (data: {
+    visitDate: string;
+    company: string;
+    company_obj?: number | null;
+    type: string;
+    location: string;
+    products: string;
+    content: string;
+    tags: string;
+  }): Promise<SalesReport> => {
     return apiCall<SalesReport>('/reports/', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -145,6 +181,14 @@ export const companyApi = {
     return apiCall<PaginatedResponse<Company>>(`/companies/${queryString}`);
   },
 
+  // 회사명 자동완성 검색
+  suggestCompanies: (query: string): Promise<Array<{id: number, name: string}>> => {
+    if (!query.trim()) {
+      return Promise.resolve([]);
+    }
+    return apiCall<Array<{id: number, name: string}>>(`/company/suggest/?query=${encodeURIComponent(query)}`);
+  },
+
   // 회사 상세 조회
   getCompany: (id: number): Promise<Company> => {
     return apiCall<Company>(`/companies/${id}/`);
@@ -187,4 +231,24 @@ export const companyApi = {
       thisMonthNew: number;
     }>('/stats/companies/');
   },
+
+  // 회사 자동 등록 (회사명만으로)
+  autoCreateCompany: (company_name: string): Promise<Company> => {
+    return apiCall<Company>('/companies/auto-create/', {
+      method: 'POST',
+      body: JSON.stringify({ company_name }),
+    });
+  },
 }; 
+
+// 키워드 추출(추천 태그) API
+export async function fetchRecommendedTags(content: string): Promise<string[]> {
+  const res = await apiCall<{ keywords: string[] }>(
+    '/extract-keywords/',
+    {
+      method: 'POST',
+      body: JSON.stringify({ text: content }),
+    }
+  );
+  return res.keywords;
+} 

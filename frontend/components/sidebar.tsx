@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
 import { Home, FileText, Building2, BarChart3, Users, Settings, Package } from "lucide-react"
 import { getUserFromToken } from "@/lib/auth"
@@ -17,7 +18,14 @@ const navigation = [
 
 export function Sidebar() {
   const pathname = usePathname()
-  const user = getUserFromToken()
+  const [user, setUser] = useState<any>(null)
+  const [isClient, setIsClient] = useState(false)
+
+  useEffect(() => {
+    setIsClient(true)
+    const currentUser = getUserFromToken()
+    setUser(currentUser)
+  }, [])
 
   return (
     <div className="flex flex-col w-64 bg-white shadow-lg">
@@ -51,15 +59,15 @@ export function Sidebar() {
         <div className="flex items-center space-x-3">
           <div className="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center">
             <span className="text-sm font-medium">
-              {user ? user.name.charAt(0) : "사"}
+              {isClient && user ? user.name.charAt(0) : "사"}
             </span>
           </div>
           <div>
             <p className="text-sm font-medium">
-              {user ? user.name : "사용자"}
+              {isClient && user ? user.name : "사용자"}
             </p>
             <p className="text-xs text-gray-500">
-              {user ? user.department : "로그인 필요"}
+              {isClient && user ? user.department : "로그인 필요"}
             </p>
           </div>
         </div>

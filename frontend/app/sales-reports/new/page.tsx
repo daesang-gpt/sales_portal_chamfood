@@ -16,15 +16,26 @@ import { format } from "date-fns"
 import { ko } from "date-fns/locale"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { salesReportApi, companyApi, Company } from "@/lib/api"
+import { salesReportApi } from "@/lib/api"
+import { getUserFromToken } from "@/lib/auth"
+import dynamic from "next/dynamic"
+import { fetchRecommendedTags } from '@/lib/api'
+import { companyApi } from "@/lib/api"
+
+// CompanySearchInput을 클라이언트에서만 로드
+const CompanySearchInput = dynamic(
+  () => import("@/components/ui/company-search-input").then(mod => ({ default: mod.CompanySearchInput })),
+  { 
+    ssr: false,
+    loading: () => <Input placeholder="로딩 중..." disabled />
+  }
+)
 
 export default function NewSalesReportPage() {
   const router = useRouter()
   const [date, setDate] = useState<Date>()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [companies, setCompanies] = useState<Company[]>([])
-  const [companiesLoading, setCompaniesLoading] = useState(true)
   const [formData, setFormData] = useState({
     company: "",
     company_obj: undefined as number | undefined,
@@ -34,22 +45,7 @@ export default function NewSalesReportPage() {
     content: "",
     tags: "",
   })
-
-  useEffect(() => {
-    fetchCompanies()
-  }, [])
-
-  const fetchCompanies = async () => {
-    try {
-      setCompaniesLoading(true)
-      const data = await companyApi.getCompanies()
-      setCompanies(data)
-    } catch (err) {
-      console.error('회사 목록 조회 오류:', err)
-    } finally {
-      setCompaniesLoading(false)
-    }
-  }
+  const [tagLoading, setTagLoading] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -59,13 +55,39 @@ export default function NewSalesReportPage() {
       return
     }
 
+    // 사용자 정보 가져오기
+    const user = getUserFromToken();
+    if (!user) {
+      setError('로그인이 필요합니다. 다시 로그인 해주세요.')
+      return
+    }
+
+    let companyId = formData.company_obj;
     try {
       setLoading(true)
       setError(null)
-      
+      // 회사 id가 없고 회사명이 있으면 자동 등록
+      if (!companyId && formData.company) {
+        try {
+          const company = await companyApi.autoCreateCompany(formData.company);
+          companyId = company.id;
+        } catch (err) {
+          setError('회사 자동 등록에 실패했습니다.');
+          setLoading(false);
+          return;
+        }
+      }
       const reportData = {
-        ...formData,
         visitDate: date.toISOString().split('T')[0], // YYYY-MM-DD 형식
+        company: formData.company,
+        company_obj: companyId || null,
+        type: formData.type,
+        location: formData.location,
+        products: formData.products,
+        content: formData.content,
+        tags: formData.tags,
+        author: user.id, // 작성자 ID
+        team: user.department, // 부서/팀명
       }
 
       await salesReportApi.createReport(reportData)
@@ -82,26 +104,30 @@ export default function NewSalesReportPage() {
     setFormData((prev) => ({ ...prev, [field]: value }))
   }
 
-  const handleCompanySelect = (companyId: string) => {
-    if (companyId === 'new') {
-      // 신규 회사 입력 모드
-      setFormData(prev => ({ 
-        ...prev, 
-        company: "", 
-        company_obj: undefined 
-      }))
-    } else {
-      // 기존 회사 선택
-      const selectedCompany = companies.find(c => c.id.toString() === companyId)
-      if (selectedCompany) {
-        setFormData(prev => ({ 
-          ...prev, 
-          company: selectedCompany.company_name, 
-          company_obj: selectedCompany.id 
-        }))
-      }
-    }
+  const handleCompanyChange = (companyName: string, companyId?: number) => {
+    setFormData(prev => ({ 
+      ...prev, 
+      company: companyName, 
+      company_obj: companyId 
+    }))
   }
+
+  // 추천 태그 추출 핸들러
+  const handleRecommendTags = async () => {
+    if (!formData.content.trim()) {
+      setError('미팅 내용을 먼저 입력해주세요.');
+      return;
+    }
+    setTagLoading(true);
+    try {
+      const tags = await fetchRecommendedTags(formData.content);
+      setFormData((prev) => ({ ...prev, tags: tags.join(', ') }));
+    } catch (err) {
+      setError('추천 태그 추출에 실패했습니다.');
+    } finally {
+      setTagLoading(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -145,34 +171,12 @@ export default function NewSalesReportPage() {
               </div>
 
               <div className="space-y-2">
-                <Label>회사 선택</Label>
-                <Select onValueChange={handleCompanySelect}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="회사를 선택하거나 신규 입력" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="new">신규 회사 입력</SelectItem>
-                    {companiesLoading ? (
-                      <SelectItem value="loading" disabled>로딩 중...</SelectItem>
-                    ) : (
-                      companies.map((company) => (
-                        <SelectItem key={company.id} value={company.id.toString()}>
-                          {company.company_name}
-                        </SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="company">회사명</Label>
-                <Input
-                  id="company"
+                <Label>회사명</Label>
+                <CompanySearchInput
                   value={formData.company}
-                  onChange={(e) => handleInputChange("company", e.target.value)}
-                  placeholder="회사명을 입력하세요"
-                  required
+                  selectedCompanyId={formData.company_obj}
+                  onChange={handleCompanyChange}
+                  placeholder="회사명을 입력하거나 선택하세요"
                 />
               </div>
 
@@ -231,7 +235,13 @@ export default function NewSalesReportPage() {
               </div>
 
               <div className="space-y-2 md:col-span-2">
+                <div className="flex items-center gap-2">
                 <Label htmlFor="tags">태그 (키워드)</Label>
+                  <Button type="button" variant="secondary" size="sm" onClick={handleRecommendTags} disabled={tagLoading}>
+                    {tagLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    키워드 추출
+                  </Button>
+                </div>
                 <Input
                   id="tags"
                   value={formData.tags}

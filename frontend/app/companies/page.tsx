@@ -9,8 +9,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Search, Plus, Eye, Building2, Phone, Loader2, ChevronLeft, ChevronRight } from "lucide-react"
 import Link from "next/link"
 import { companyApi, Company, CompanyFilters, PaginatedResponse } from "@/lib/api"
+import { PaginationInput } from "@/components/ui/pagination"
+import { useRouter, useSearchParams } from "next/navigation"
 
 export default function CompaniesPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialPage = Number(searchParams.get("page")) || 1;
   const [companies, setCompanies] = useState<Company[]>([])
   const [stats, setStats] = useState({
     total: 0,
@@ -21,7 +26,7 @@ export default function CompaniesPage() {
   const [searchTerm, setSearchTerm] = useState("")
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [currentPage, setCurrentPage] = useState(1)
+  const [currentPage, setCurrentPage] = useState(initialPage)
   const [totalPages, setTotalPages] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
 
@@ -89,30 +94,25 @@ export default function CompaniesPage() {
     }
   }, [currentPage, searchTerm])
 
-  // 검색어 변경 시 데이터 다시 로드 (통계는 제외)
+  // 페이지네이션 쿼리스트링 동기화
   useEffect(() => {
-    const timeoutId = setTimeout(async () => {
-      setCurrentPage(1) // 검색 시 첫 페이지로 이동
-      try {
-        setLoading(true)
-        setError(null)
-        
-        // 검색 시에는 회사 목록만 로드하고 통계는 유지
-        const companiesData = await companyApi.getCompanies({ search: searchTerm }, 1)
-        
-        setCompanies(companiesData.results)
-        setTotalCount(companiesData.count)
-        setTotalPages(Math.ceil(companiesData.count / 10))
-      } catch (err) {
-        setError('데이터를 불러오는 중 오류가 발생했습니다.')
-        console.error('Error loading companies:', err)
-      } finally {
-        setLoading(false)
-      }
-    }, 500) // 500ms 디바운스
+    if (currentPage !== initialPage) {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("page", String(currentPage));
+      router.replace(`/companies?${params.toString()}`);
+    }
+    // eslint-disable-next-line
+  }, [currentPage]);
 
-    return () => clearTimeout(timeoutId)
-  }, [searchTerm])
+  // 검색어 변경 시 쿼리스트링 page=1로 동기화
+  useEffect(() => {
+    if (searchTerm !== "") {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("page", "1");
+      router.replace(`/companies?${params.toString()}`);
+    }
+    // eslint-disable-next-line
+  }, [searchTerm]);
 
   // 데이터 매핑 헬퍼 함수
   const getCompanyDisplayName = (company: Company) => {
@@ -333,6 +333,12 @@ export default function CompaniesPage() {
                     );
                   })}
                 </div>
+                
+                <PaginationInput
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  onPageChange={setCurrentPage}
+                />
                 
                 <Button
                   variant="outline"

@@ -7,6 +7,11 @@ class CompanySerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class ReportSerializer(serializers.ModelSerializer):
+    company_obj = serializers.PrimaryKeyRelatedField(
+        queryset=Company.objects.all(),
+        required=False,
+        allow_null=True
+    )
     author_name = serializers.CharField(source='author.name', read_only=True)
     author_department = serializers.CharField(source='author.department', read_only=True)
     
@@ -18,7 +23,12 @@ class ReportSerializer(serializers.ModelSerializer):
     class Meta:
         model = Report
         fields = ['id', 'author', 'author_name', 'author_department', 'team', 'team_display', 'visitDate', 'company', 'company_obj', 'company_display', 'type', 'location', 'products', 'content', 'tags', 'createdAt']
-        read_only_fields = ['id', 'createdAt']
+        read_only_fields = ['id', 'createdAt', 'author', 'team']
+
+    def validate(self, data):
+        """데이터 검증"""
+        print(f"ReportSerializer validate - data: {data}")
+        return data
 
     def get_team_display(self, obj):
         """팀명을 표시용으로 변환"""

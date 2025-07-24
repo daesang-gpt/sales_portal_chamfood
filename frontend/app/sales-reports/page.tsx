@@ -9,25 +9,41 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Search, Plus, Eye, Edit, Loader2, ChevronLeft, ChevronRight } from "lucide-react"
 import Link from "next/link"
 import { salesReportApi, SalesReport, PaginatedResponse } from "@/lib/api"
+import { PaginationInput } from "@/components/ui/pagination"
+import { useRouter, useSearchParams } from "next/navigation"
 
 export default function SalesReportsPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialPage = Number(searchParams.get("page")) || 1;
   const [searchTerm, setSearchTerm] = useState("")
   const [reports, setReports] = useState<SalesReport[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [currentPage, setCurrentPage] = useState(1)
+  const [currentPage, setCurrentPage] = useState(initialPage)
   const [totalPages, setTotalPages] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
 
   useEffect(() => {
+    console.log('searchParams.get("page")', searchParams.get("page"));
+    console.log('initialPage', initialPage);
+    console.log('currentPage', currentPage);
     fetchReports(currentPage)
-  }, [currentPage])
+    // URL 쿼리스트링 동기화
+    if (currentPage !== initialPage) {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("page", String(currentPage));
+      router.replace(`/sales-reports?${params.toString()}`);
+    }
+    // eslint-disable-next-line
+  }, [currentPage]);
 
   const fetchReports = async (page: number = 1) => {
     try {
       setLoading(true)
       setError(null)
-      const data: PaginatedResponse<SalesReport> = await salesReportApi.getReports(page)
+      // 방문일자 기준으로 내림차순 정렬 (최신순)
+      const data: PaginatedResponse<SalesReport> = await salesReportApi.getReports(page, '-visitDate')
       setReports(data.results)
       setTotalCount(data.count)
       setTotalPages(Math.ceil(data.count / 10))
@@ -155,44 +171,53 @@ export default function SalesReportsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredReports.map((report) => (
-                  <TableRow key={report.id}>
-                    <TableCell className="font-medium">{report.author_name}</TableCell>
-                    <TableCell>{report.team_display}</TableCell>
-                    <TableCell>{formatDate(report.visitDate)}</TableCell>
-                    <TableCell>{report.company_display}</TableCell>
-                    <TableCell>
-                      <Badge variant={getTypeBadge(report.type)}>
-                        {report.type}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{report.location}</TableCell>
-                    <TableCell>{report.products}</TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        {report.tags.split(',').filter(tag => tag.trim()).map((tag, index) => (
-                          <Badge key={index} variant="outline" className="text-xs">
-                            {tag.trim()}
-                          </Badge>
-                        ))}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center space-x-2">
-                        <Button variant="ghost" size="sm" asChild>
-                          <Link href={`/sales-reports/${report.id}`}>
-                            <Eye className="h-4 w-4" />
-                          </Link>
-                        </Button>
-                        <Button variant="ghost" size="sm" asChild>
-                          <Link href={`/sales-reports/${report.id}/edit`}>
-                            <Edit className="h-4 w-4" />
-                          </Link>
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {filteredReports.map((report: SalesReport) => {
+                  console.log('report.tags:', report.tags);
+                  const tagsArr = report.tags ? report.tags.split(',').filter((tag: string) => tag.trim()) : [];
+                  const showTags = tagsArr.slice(0, 3);
+                  console.log('tagsArr:', tagsArr, 'showTags:', showTags);
+                  return (
+                    <TableRow key={report.id}>
+                      <TableCell className="font-medium">{report.author_name}</TableCell>
+                      <TableCell>{report.team_display}</TableCell>
+                      <TableCell>{formatDate(report.visitDate)}</TableCell>
+                      <TableCell>{report.company_display}</TableCell>
+                      <TableCell>
+                        <Badge variant={getTypeBadge(report.type)}>
+                          {report.type}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{report.location}</TableCell>
+                      <TableCell>{report.products}</TableCell>
+                      <TableCell>
+                        <div className="flex gap-1 items-center">
+                          {showTags.map((tag: string, index: number) => (
+                            <Badge key={index} variant="outline" className="text-xs">
+                              {tag.trim()}
+                            </Badge>
+                          ))}
+                          {tagsArr.length > 3 && (
+                            <span className="text-xs text-muted-foreground ml-1">...</span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center space-x-2">
+                          <Button variant="ghost" size="sm" asChild>
+                            <Link href={`/sales-reports/${report.id}?page=${currentPage}`}>
+                              <Eye className="h-4 w-4" />
+                            </Link>
+                          </Button>
+                          <Button variant="ghost" size="sm" asChild>
+                            <Link href={`/sales-reports/${report.id}/edit?page=${currentPage}`}>
+                              <Edit className="h-4 w-4" />
+                            </Link>
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           )}
@@ -240,6 +265,12 @@ export default function SalesReportsPage() {
                     );
                   })}
                 </div>
+                
+                <PaginationInput
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  onPageChange={setCurrentPage}
+                />
                 
                 <Button
                   variant="outline"

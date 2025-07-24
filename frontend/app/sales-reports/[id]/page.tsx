@@ -4,17 +4,21 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { ArrowLeft, Edit, FileImage, Loader2 } from "lucide-react"
+import { ArrowLeft, Edit, FileImage, Loader2, Trash2 } from "lucide-react"
 import Link from "next/link"
-import { useParams } from "next/navigation"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useState } from "react"
 import { salesReportApi, SalesReport } from "@/lib/api"
 
 export default function SalesReportDetailPage() {
   const params = useParams()
+  const router = useRouter()
+  const searchParams = useSearchParams();
+  const page = searchParams.get("page") || "1";
   const [report, setReport] = useState<SalesReport | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     const fetchReport = async () => {
@@ -40,6 +44,25 @@ export default function SalesReportDetailPage() {
     console.log("영업일지 이미지 다운로드")
   }
 
+  const handleDelete = async () => {
+    if (!report) return
+    
+    if (!confirm('정말로 이 영업일지를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) {
+      return
+    }
+
+    try {
+      setDeleting(true)
+      await salesReportApi.deleteReport(report.id)
+      alert('영업일지가 성공적으로 삭제되었습니다.')
+      router.push(`/sales-reports?page=${page}`)
+    } catch (err) {
+      alert('영업일지 삭제에 실패했습니다: ' + (err instanceof Error ? err.message : '알 수 없는 오류'))
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -56,7 +79,7 @@ export default function SalesReportDetailPage() {
       <div className="space-y-6">
         <div className="flex items-center space-x-4">
           <Button variant="outline" size="sm" asChild>
-            <Link href="/sales-reports">
+            <Link href={`/sales-reports?page=${page}`}>
               <ArrowLeft className="mr-2 h-4 w-4" />
               목록으로
             </Link>
@@ -82,7 +105,7 @@ export default function SalesReportDetailPage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
           <Button variant="outline" size="sm" asChild>
-            <Link href="/sales-reports">
+            <Link href={`/sales-reports?page=${page}`}>
               <ArrowLeft className="mr-2 h-4 w-4" />
               목록으로
             </Link>
@@ -94,8 +117,20 @@ export default function SalesReportDetailPage() {
             <FileImage className="mr-2 h-4 w-4" />
             이미지 다운로드
           </Button>
+          <Button 
+            variant="destructive" 
+            onClick={handleDelete}
+            disabled={deleting}
+          >
+            {deleting ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Trash2 className="mr-2 h-4 w-4" />
+            )}
+            삭제
+          </Button>
           <Button asChild>
-            <Link href={`/sales-reports/${report.id}/edit`}>
+            <Link href={`/sales-reports/${report.id}/edit?page=${page}`}>
               <Edit className="mr-2 h-4 w-4" />
               수정
             </Link>
