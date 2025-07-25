@@ -12,25 +12,60 @@ import { salesReportApi, SalesReport, PaginatedResponse } from "@/lib/api"
 import { PaginationInput } from "@/components/ui/pagination"
 import { useRouter, useSearchParams } from "next/navigation"
 
+const PERIOD_OPTIONS = [
+  { label: "1개월", value: "1m" },
+  { label: "3개월", value: "3m" },
+  { label: "6개월", value: "6m" },
+  { label: "전체", value: "all" },
+];
+
 export default function SalesReportsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialPage = Number(searchParams.get("page")) || 1;
-  const [searchTerm, setSearchTerm] = useState("")
-  const [reports, setReports] = useState<SalesReport[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [currentPage, setCurrentPage] = useState(initialPage)
-  const [totalPages, setTotalPages] = useState(1)
-  const [totalCount, setTotalCount] = useState(0)
+  const [searchTerm, setSearchTerm] = useState("");
+  const [period, setPeriod] = useState("all");
+  const [currentPage, setCurrentPage] = useState(initialPage);
+  const [reports, setReports] = useState<SalesReport[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
 
+  // 검색 버튼 클릭 시 API 호출
+  const fetchReports = async (page = 1, search = searchTerm, periodValue = period) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await salesReportApi.getReports({
+        page,
+        page_size: 10,
+        search: search.trim() ? search : undefined,
+        period: periodValue,
+        ordering: "-visitDate",
+      });
+      setReports(data.results);
+      setTotalCount(data.count);
+      setTotalPages(data.total_pages);
+      setCurrentPage(data.current_page);
+    } catch (err) {
+      setError("영업일지를 불러오는 중 오류가 발생했습니다.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 최초 마운트 시 1회 호출
   useEffect(() => {
-    console.log('searchParams.get("page")', searchParams.get("page"));
-    console.log('initialPage', initialPage);
-    console.log('currentPage', currentPage);
-    fetchReports(currentPage)
-    // URL 쿼리스트링 동기화
+    fetchReports(1, searchTerm, period);
+    // eslint-disable-next-line
+  }, []);
+
+  // 페이지 변경 시 API 호출
+  useEffect(() => {
     if (currentPage !== initialPage) {
+      fetchReports(currentPage, searchTerm, period);
+      // URL 쿼리스트링 동기화
       const params = new URLSearchParams(searchParams.toString());
       params.set("page", String(currentPage));
       router.replace(`/sales-reports?${params.toString()}`);
@@ -38,34 +73,22 @@ export default function SalesReportsPage() {
     // eslint-disable-next-line
   }, [currentPage]);
 
-  const fetchReports = async (page: number = 1) => {
-    try {
-      setLoading(true)
-      setError(null)
-      // 방문일자 기준으로 내림차순 정렬 (최신순)
-      const data: PaginatedResponse<SalesReport> = await salesReportApi.getReports(page, '-visitDate')
-      setReports(data.results)
-      setTotalCount(data.count)
-      setTotalPages(Math.ceil(data.count / 10))
-    } catch (err) {
-      setError('영업일지를 불러오는 중 오류가 발생했습니다.')
-      console.error('영업일지 조회 오류:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
+  // 기간 변경 시 API 호출
+  useEffect(() => {
+    fetchReports(1, searchTerm, period);
+    setCurrentPage(1);
+    // eslint-disable-next-line
+  }, [period]);
 
-  // 검색 기능은 클라이언트 사이드에서 처리 (현재 페이지의 데이터만)
-  const filteredReports = reports.filter(
-    (report) =>
-      report.company_display.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      report.author_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      report.type.toLowerCase().includes(searchTerm.toLowerCase()),
-  )
+  // 검색 버튼 클릭 핸들러
+  const handleSearch = () => {
+    fetchReports(1, searchTerm, period);
+    setCurrentPage(1);
+  };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('ko-KR')
-  }
+    return new Date(dateString).toLocaleDateString('ko-KR');
+  };
 
   const getTypeBadge = (type: string) => {
     const variants: Record<string, "default" | "secondary" | "outline"> = {
@@ -73,9 +96,9 @@ export default function SalesReportsPage() {
       '전화': 'secondary',
       '화상': 'outline',
       '이메일': 'outline',
-    }
-    return variants[type] || 'outline'
-  }
+    };
+    return variants[type] || 'outline';
+  };
 
   if (loading) {
     return (
@@ -85,7 +108,7 @@ export default function SalesReportsPage() {
           <span>영업일지를 불러오는 중...</span>
         </div>
       </div>
-    )
+    );
   }
 
   if (error) {
@@ -100,19 +123,18 @@ export default function SalesReportsPage() {
             </Link>
           </Button>
         </div>
-        
         <Card>
           <CardContent className="flex items-center justify-center min-h-[200px]">
             <div className="text-center">
               <p className="text-red-600 mb-4">{error}</p>
-              <Button onClick={() => fetchReports(currentPage)} variant="outline">
+              <Button onClick={() => fetchReports(currentPage, searchTerm, period)} variant="outline">
                 다시 시도
               </Button>
             </div>
           </CardContent>
         </Card>
       </div>
-    )
+    );
   }
 
   return (
@@ -126,7 +148,6 @@ export default function SalesReportsPage() {
           </Link>
         </Button>
       </div>
-
       <Card>
         <CardHeader>
           <CardTitle>영업일지 목록</CardTitle>
@@ -137,14 +158,26 @@ export default function SalesReportsPage() {
             <div className="relative flex-1">
               <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="회사명, 작성자 또는 영업형태로 검색..."
+                placeholder="회사명, 작성자 또는 태그로 검색..."
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={e => setSearchTerm(e.target.value)}
                 className="pl-8"
+                onKeyDown={e => { if (e.key === 'Enter') handleSearch(); }}
               />
             </div>
+            <Button onClick={handleSearch} variant="default">검색</Button>
+            <div className="flex gap-2 ml-4">
+              {PERIOD_OPTIONS.map(opt => (
+                <Button
+                  key={opt.value}
+                  onClick={() => setPeriod(opt.value)}
+                  variant={period === opt.value ? "default" : "outline"}
+                >
+                  {opt.label}
+                </Button>
+              ))}
+            </div>
           </div>
-
           {reports.length === 0 ? (
             <div className="text-center py-8">
               <p className="text-muted-foreground">등록된 영업일지가 없습니다.</p>
@@ -171,11 +204,9 @@ export default function SalesReportsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredReports.map((report: SalesReport) => {
-                  console.log('report.tags:', report.tags);
+                {reports.map((report: SalesReport) => {
                   const tagsArr = report.tags ? report.tags.split(',').filter((tag: string) => tag.trim()) : [];
                   const showTags = tagsArr.slice(0, 3);
-                  console.log('tagsArr:', tagsArr, 'showTags:', showTags);
                   return (
                     <TableRow key={report.id}>
                       <TableCell className="font-medium">{report.author_name}</TableCell>
@@ -221,7 +252,6 @@ export default function SalesReportsPage() {
               </TableBody>
             </Table>
           )}
-
           {/* 페이지네이션 */}
           {reports.length > 0 && (
             <div className="flex items-center justify-between mt-6">
@@ -238,7 +268,6 @@ export default function SalesReportsPage() {
                   <ChevronLeft className="h-4 w-4" />
                   이전
                 </Button>
-                
                 <div className="flex items-center space-x-1">
                   {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
                     let pageNum;
@@ -251,7 +280,6 @@ export default function SalesReportsPage() {
                     } else {
                       pageNum = currentPage - 2 + i;
                     }
-                    
                     return (
                       <Button
                         key={pageNum}
@@ -265,13 +293,11 @@ export default function SalesReportsPage() {
                     );
                   })}
                 </div>
-                
                 <PaginationInput
                   currentPage={currentPage}
                   totalPages={totalPages}
                   onPageChange={setCurrentPage}
                 />
-                
                 <Button
                   variant="outline"
                   size="sm"
@@ -287,5 +313,5 @@ export default function SalesReportsPage() {
         </CardContent>
       </Card>
     </div>
-  )
+  );
 }

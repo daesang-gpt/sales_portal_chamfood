@@ -4,15 +4,17 @@ from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
-from django.db.models import Q, Count, Max
+from django.db.models import Q, Max
 from django.utils import timezone
-from datetime import datetime
+from datetime import timedelta
 from .models import Company, Report, User
-from .serializers import CompanySerializer, ReportSerializer, UserSerializer, LoginSerializer, RegisterSerializer
-import re
+from .serializers import CompanySerializer, ReportSerializer, UserSerializer, LoginSerializer, RegisterSerializer, CompanyFinancialStatusSerializer
 from keybert import KeyBERT
 from sentence_transformers import SentenceTransformer, util
 import numpy as np
+from rest_framework.pagination import PageNumberPagination
+from . import models
+from rest_framework.generics import ListAPIView
 
 # 태그 후보 및 임베딩 캐싱
 TAG_CANDIDATES = None
@@ -44,27 +46,29 @@ class CompanyViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = Company.objects.all()
-        
         # 검색 파라미터 처리
         search = self.request.query_params.get('search', None)
         customer_classification = self.request.query_params.get('customer_classification', None)
         industry_name = self.request.query_params.get('industry_name', None)
-        
+
         if search:
             queryset = queryset.filter(
                 Q(company_name__icontains=search) |
-                Q(ceo_name__icontains=search) |
-                Q(contact_person__icontains=search) |
-                Q(address__icontains=search)
+                Q(username__name__icontains=search) |
+                Q(username__username__icontains=search)
             )
-        
         if customer_classification:
             queryset = queryset.filter(customer_classification=customer_classification)
-            
         if industry_name:
             queryset = queryset.filter(industry_name__icontains=industry_name)
-        
         return queryset.order_by('company_name')
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        # 연결된 영업일지(Report)가 있는지 확인
+        if instance.reports.exists():
+            return Response({'error': '이 회사에 연결된 영업일지가 존재하여 삭제할 수 없습니다.'}, status=status.HTTP_400_BAD_REQUEST, content_type='application/json')
+        return super().destroy(request, *args, **kwargs)
 
 class ReportViewSet(viewsets.ModelViewSet):
     queryset = Report.objects.all()  # type: ignore[attr-defined]
@@ -303,7 +307,7 @@ def extract_keywords_view(request):
             text,
             keyphrase_ngram_range=(1, 3),
             stop_words=None,
-            top_n=20
+            top_n=10  # 기존 20 → 10으로 속도 개선
         )
         candidates = [kw[0] if not isinstance(kw[0], tuple) else ' '.join(kw[0]) for kw in keybert_keywords]
         candidate_embeddings = TAG_MODEL.encode(candidates, convert_to_tensor=True)
@@ -312,8 +316,12 @@ def extract_keywords_view(request):
             cos_scores = util.pytorch_cos_sim(cand_emb, TAG_EMBEDDINGS)[0]
             best_idx = int(np.argmax(cos_scores))
             best_score = float(cos_scores[best_idx])
-            if best_score >= 0.5:
-                matched_tags.add(TAG_CANDIDATES[best_idx])
+            candidate = candidates[i]
+            db_tag = TAG_CANDIDATES[best_idx]
+            if db_tag in text:
+                matched_tags.add(db_tag)
+            elif best_score >= 0.75:
+                matched_tags.add(db_tag)
         # 최대 10개 반환
         return Response({
             'keywords': list(matched_tags)[:10]
@@ -323,3 +331,57 @@ def extract_keywords_view(request):
             'error': '키워드 추출 중 오류가 발생했습니다.',
             'detail': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class SalesReportPagination(PageNumberPagination):
+    page_size = 10
+    page_size_query_param = 'page_size'
+
+    def get_paginated_response(self, data):
+        return Response({
+            'results': data,
+            'count': self.page.paginator.count,
+            'total_pages': self.page.paginator.num_pages,
+            'current_page': self.page.number
+        })
+
+class SalesReportListView(ListAPIView):
+    serializer_class = ReportSerializer
+    pagination_class = SalesReportPagination
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        queryset = Report.objects.all()
+        # 인증 및 권한 분기
+        if user and user.is_authenticated and hasattr(user, 'role'):
+            if user.role != 'admin':
+                queryset = queryset.filter(author=user)
+        # 검색/필터/정렬
+        search = self.request.query_params.get('search', '').strip()
+        period = self.request.query_params.get('period', 'all')
+        ordering = self.request.query_params.get('ordering', '-visitDate')
+        company_id = self.request.query_params.get('companyId', '').strip()
+
+        if company_id:
+            queryset = queryset.filter(
+                Q(company_obj__sales_diary_company_code=company_id) |
+                Q(company=company_id)
+            )
+        if search:
+            queryset = queryset.filter(
+                Q(company__icontains=search) |
+                Q(author__username__icontains=search) |
+                Q(author__name__icontains=search) |
+                Q(tags__icontains=search)
+            )
+        if period in ['1m', '3m', '6m']:
+            months = int(period[0])
+            start_date = timezone.now().date() - timedelta(days=30 * months)
+            queryset = queryset.filter(visitDate__gte=start_date)
+        queryset = queryset.order_by(ordering)
+        return queryset
+
+class CompanyFinancialStatusViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = models.CompanyFinancialStatus.objects.all()
+    serializer_class = CompanyFinancialStatusSerializer
+    permission_classes = [IsAuthenticated]

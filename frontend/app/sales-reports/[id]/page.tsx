@@ -9,6 +9,7 @@ import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useState } from "react"
 import { salesReportApi, SalesReport } from "@/lib/api"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 
 export default function SalesReportDetailPage() {
   const params = useParams()
@@ -19,6 +20,10 @@ export default function SalesReportDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [otherReports, setOtherReports] = useState<SalesReport[]>([])
+  const [showAll, setShowAll] = useState(false)
+  const [otherLoading, setOtherLoading] = useState(false)
+  const [otherError, setOtherError] = useState<string | null>(null)
 
   useEffect(() => {
     const fetchReport = async () => {
@@ -37,6 +42,30 @@ export default function SalesReportDetailPage() {
       fetchReport()
     }
   }, [params.id])
+
+  // 같은 회사의 다른 영업일지 불러오기
+  useEffect(() => {
+    const fetchOtherReports = async () => {
+      if (!report || !report.company) return;
+      setOtherLoading(true)
+      setOtherError(null)
+      try {
+        const data = await salesReportApi.getReports({
+          companyId: report.company,
+          ordering: "-visitDate",
+          page_size: 100, // 충분히 크게 받아서 10개만 보여줌
+        })
+        setOtherReports(data.results)
+      } catch (err) {
+        setOtherError("같은 회사의 영업일지를 불러오는 중 오류가 발생했습니다.")
+      } finally {
+        setOtherLoading(false)
+      }
+    }
+    if (report && report.company) {
+      fetchOtherReports()
+    }
+  }, [report])
 
   const handleDownloadImage = () => {
     // 영업일지를 이미지로 변환하여 다운로드하는 로직
@@ -207,6 +236,53 @@ export default function SalesReportDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* 같은 회사의 다른 영업일지 리스트 */}
+      <div className="mt-10">
+        <h2 className="text-xl font-bold mb-4">영업일지 리스트</h2>
+        {otherLoading ? (
+          <div className="flex items-center space-x-2 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /> 불러오는 중...</div>
+        ) : otherError ? (
+          <div className="text-red-600">{otherError}</div>
+        ) : otherReports.length === 0 ? (
+          <div className="text-muted-foreground">같은 회사의 다른 영업일지가 없습니다.</div>
+        ) : (
+          <Card className="bg-white">
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>방문일자</TableHead>
+                    <TableHead>미팅 내용(이슈사항)</TableHead>
+                    <TableHead>작성자</TableHead>
+                    <TableHead>영업형태</TableHead>
+                    <TableHead className="text-center">상세보기</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(showAll ? otherReports : otherReports.slice(0, 10)).map((r) => {
+                    const isCurrent = r.id === report.id
+                    return (
+                      <TableRow key={r.id} className={isCurrent ? "bg-gray-200 font-semibold" : "hover:bg-gray-50 cursor-pointer"} onClick={() => !isCurrent && router.push(`/sales-reports/${r.id}`)}>
+                        <TableCell>{new Date(r.visitDate).toLocaleDateString('ko-KR')}</TableCell>
+                        <TableCell>{r.content.slice(0, 40)}{r.content.length > 40 ? '...' : ''}</TableCell>
+                        <TableCell>{r.author_name}</TableCell>
+                        <TableCell><Badge variant={r.type === "대면" ? "default" : "secondary"}>{r.type}</Badge></TableCell>
+                        <TableCell className="text-center">{isCurrent ? <span className="text-gray-700 font-semibold">현재</span> : <Button size="sm" variant="outline">이동</Button>}</TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+              {otherReports.length > 10 && !showAll && (
+                <div className="flex justify-end mt-2">
+                  <Button size="sm" variant="ghost" onClick={() => setShowAll(true)}>더 보기</Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+      </div>
     </div>
   )
 }

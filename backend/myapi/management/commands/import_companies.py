@@ -3,7 +3,8 @@ import os
 from datetime import datetime
 from django.core.management.base import BaseCommand
 from django.db import transaction
-from myapi.models import Company
+from myapi.models import Company, CompanyFinancialStatus
+from datetime import date
 
 
 class Command(BaseCommand):
@@ -132,3 +133,39 @@ class Command(BaseCommand):
                 self.style.ERROR(f'업로드 중 오류가 발생했습니다: {str(e)}')
             )
             raise 
+
+
+class Command(BaseCommand):
+    help = '예시 회사매출현황 데이터를 추가합니다.'
+
+    def handle(self, *args, **options):
+        company_code = 'C0000020'
+        company = Company.objects.filter(sales_diary_company_code=company_code).first()
+        if not company:
+            self.stdout.write(self.style.ERROR(f'회사 코드 {company_code}에 해당하는 회사가 없습니다.'))
+            return
+        data = [
+            # (결산년도, 총자산, 자본금, 자본총계, 매출액, 영업이익, 당기순이익)
+            (date(2024,12,31), 948357, 100000, 412939, 10017940, 177331, 175058),
+            (date(2023,12,31), 901292, 100000, 237881, 3912333, 39466, 35305),
+            (date(2022,12,31), 1093178, 100000, 202576, 5442020, 68757, 61309),
+            (date(2021,12,31), 581566, 100000, 141267, 4591711, 41153, 36774),
+            (date(2020,12,31), 628810, 100000, 104493, 3174441, 4890, 4493),
+        ]
+        created = 0
+        for fiscal_year, total_assets, capital, total_equity, revenue, operating_income, net_income in data:
+            obj, is_created = CompanyFinancialStatus.objects.get_or_create(
+                company=company,
+                fiscal_year=fiscal_year,
+                defaults={
+                    'total_assets': total_assets,
+                    'capital': capital,
+                    'total_equity': total_equity,
+                    'revenue': revenue,
+                    'operating_income': operating_income,
+                    'net_income': net_income,
+                }
+            )
+            if is_created:
+                created += 1
+        self.stdout.write(self.style.SUCCESS(f'예시 데이터 {created}건 추가 완료')) 

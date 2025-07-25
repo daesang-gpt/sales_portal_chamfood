@@ -159,6 +159,7 @@ SIMPLE_JWT = {
     'TOKEN_TYPE_CLAIM': 'token_type',
 
     'JTI_CLAIM': 'jti',
+    'TOKEN_OBTAIN_SERIALIZER': 'myapi.serializers.MyTokenObtainPairSerializer',
 }
 
 # REST Framework Settings

@@ -11,6 +11,8 @@ import Link from "next/link"
 import { companyApi, Company, CompanyFilters, PaginatedResponse } from "@/lib/api"
 import { PaginationInput } from "@/components/ui/pagination"
 import { useRouter, useSearchParams } from "next/navigation"
+// User 타입 정의 (간단히 id, name만 사용)
+// type User = { id: number; name: string };
 
 export default function CompaniesPage() {
   const router = useRouter();
@@ -23,12 +25,14 @@ export default function CompaniesPage() {
     existingCustomers: 0,
     thisMonthNew: 0
   })
-  const [searchTerm, setSearchTerm] = useState("")
+  const [searchTerm, setSearchTerm] = useState("");
+  const [pendingSearch, setPendingSearch] = useState("");
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [currentPage, setCurrentPage] = useState(initialPage)
   const [totalPages, setTotalPages] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
+  // const [users, setUsers] = useState<User[]>([]);
 
   // 데이터 로드
   const loadData = async (page: number = 1) => {
@@ -69,42 +73,40 @@ export default function CompaniesPage() {
     loadData(currentPage)
   }, [])
 
-  // 페이지 변경 시 회사 목록만 로드
+  // 페이지 변경, 검색어 변경 시 회사 목록만 로드
   useEffect(() => {
-    if (currentPage > 1) {
-      const loadCompaniesOnly = async () => {
-        try {
-          setLoading(true)
-          setError(null)
-          
-          const companiesData = await companyApi.getCompanies({ search: searchTerm }, currentPage)
-          
-          setCompanies(companiesData.results)
-          setTotalCount(companiesData.count)
-          setTotalPages(Math.ceil(companiesData.count / 10))
-        } catch (err) {
-          setError('데이터를 불러오는 중 오류가 발생했습니다.')
-          console.error('Error loading companies:', err)
-        } finally {
-          setLoading(false)
-        }
+    const loadCompanies = async () => {
+      try {
+        setLoading(true)
+        setError(null)
+        const companiesData = await companyApi.getCompanies({ search: searchTerm }, currentPage)
+        setCompanies(companiesData.results)
+        setTotalCount(companiesData.count)
+        setTotalPages(Math.ceil(companiesData.count / 10))
+      } catch (err) {
+        setError('데이터를 불러오는 중 오류가 발생했습니다.')
+        console.error('Error loading companies:', err)
+      } finally {
+        setLoading(false)
       }
-      
-      loadCompaniesOnly()
     }
+    loadCompanies()
   }, [currentPage, searchTerm])
 
-  // 페이지네이션 쿼리스트링 동기화
+  // 페이지네이션, 검색어 쿼리스트링 동기화
   useEffect(() => {
-    if (currentPage !== initialPage) {
-      const params = new URLSearchParams(searchParams.toString());
-      params.set("page", String(currentPage));
-      router.replace(`/companies?${params.toString()}`);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("page", String(currentPage));
+    if (searchTerm) {
+      params.set("search", searchTerm);
+    } else {
+      params.delete("search");
     }
+    router.replace(`/companies?${params.toString()}`);
     // eslint-disable-next-line
-  }, [currentPage]);
+  }, [currentPage, searchTerm]);
 
-  // 검색어 변경 시 쿼리스트링 page=1로 동기화
+  // 검색 버튼 또는 엔터로만 검색 실행
   useEffect(() => {
     if (searchTerm !== "") {
       const params = new URLSearchParams(searchParams.toString());
@@ -114,13 +116,17 @@ export default function CompaniesPage() {
     // eslint-disable-next-line
   }, [searchTerm]);
 
+  const handleSearch = () => {
+    setSearchTerm(pendingSearch);
+    setCurrentPage(1);
+  };
+
   // 데이터 매핑 헬퍼 함수
   const getCompanyDisplayName = (company: Company) => {
     return company.company_name || 'Unknown Company'
   }
-
-  const getCompanyCode = (company: Company) => {
-    return company.sales_diary_company_code || '-'
+  const getSalesPersonName = (company: Company) => {
+    return company.username_display || '-';
   }
 
   const getCompanyType = (company: Company) => {
@@ -229,12 +235,14 @@ export default function CompaniesPage() {
             <div className="relative flex-1">
               <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="회사명 또는 회사코드로 검색..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="회사명 또는 영업 사원으로 검색..."
+                value={pendingSearch}
+                onChange={e => setPendingSearch(e.target.value)}
                 className="pl-8"
+                onKeyDown={e => { if (e.key === 'Enter') handleSearch(); }}
               />
             </div>
+            <Button onClick={handleSearch} variant="default">검색</Button>
             {loading && <Loader2 className="h-4 w-4 animate-spin" />}
           </div>
 
@@ -242,7 +250,7 @@ export default function CompaniesPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>회사명</TableHead>
-                <TableHead>회사코드</TableHead>
+                <TableHead>영업 사원</TableHead>
                 <TableHead>기업형태</TableHead>
                 <TableHead>대표자</TableHead>
                 <TableHead>연락처</TableHead>
@@ -257,7 +265,7 @@ export default function CompaniesPage() {
                   <TableCell className="font-medium">
                     {getCompanyDisplayName(company)}
                   </TableCell>
-                  <TableCell>{getCompanyCode(company)}</TableCell>
+                  <TableCell>{getSalesPersonName(company)}</TableCell>
                   <TableCell>{getCompanyType(company)}</TableCell>
                   <TableCell>{getCompanyRepresentative(company)}</TableCell>
                   <TableCell>

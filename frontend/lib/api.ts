@@ -41,12 +41,26 @@ export interface Company {
   customer_classification?: string;
   website?: string;
   remarks?: string;
+  username?: number | null; // 영업 사원 (User FK)
+  username_display?: string | null; // 영업 사원 이름
 }
 
 export interface CompanyFilters {
   search?: string;
   customer_classification?: string;
   industry_name?: string;
+}
+
+export interface CompanyFinancialStatus {
+  id: number;
+  company: number;
+  fiscal_year: string;
+  total_assets: number;
+  capital: number;
+  total_equity: number;
+  revenue: number;
+  operating_income: number;
+  net_income: number;
 }
 
 // API 호출 헬퍼 함수
@@ -72,6 +86,10 @@ async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<
     try {
       const errorData = await response.json();
       console.error('Error details:', errorData);
+      // errorData가 객체이고 error 필드가 있으면 그 메시지만 전달
+      if (errorData && typeof errorData === 'object' && errorData.error) {
+        throw new Error(errorData.error);
+      }
       throw new Error(`API 호출 실패: ${response.status} - ${endpoint}\n${JSON.stringify(errorData, null, 2)}`);
     } catch (parseError) {
       throw new Error(`API 호출 실패: ${response.status} - ${endpoint}`);
@@ -99,25 +117,32 @@ async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<
 
 // 페이지네이션 응답 타입
 export interface PaginatedResponse<T> {
-  count: number;
-  next: string | null;
-  previous: string | null;
   results: T[];
+  count: number;
+  total_pages: number;
+  current_page: number;
 }
 
 // 영업일지 관련 API
 export const salesReportApi = {
-  // 영업일지 목록 조회 (페이지네이션 지원)
-  getReports: (page?: number, ordering?: string): Promise<PaginatedResponse<SalesReport>> => {
+  // 영업일지 목록 조회 (페이지네이션/검색/필터 지원)
+  getReports: (paramsObj: {
+    page?: number;
+    page_size?: number;
+    search?: string;
+    period?: string;
+    ordering?: string;
+    companyId?: string | number;
+  } = {}): Promise<PaginatedResponse<SalesReport>> => {
     const params = new URLSearchParams();
-    if (page) {
-      params.append('page', page.toString());
-    }
-    if (ordering) {
-      params.append('ordering', ordering);
-    }
+    if (paramsObj.page) params.append('page', paramsObj.page.toString());
+    if (paramsObj.page_size) params.append('page_size', paramsObj.page_size.toString());
+    if (paramsObj.search) params.append('search', paramsObj.search);
+    if (paramsObj.period) params.append('period', paramsObj.period);
+    if (paramsObj.ordering) params.append('ordering', paramsObj.ordering);
+    if (paramsObj.companyId) params.append('companyId', paramsObj.companyId.toString());
     const queryString = params.toString() ? `?${params.toString()}` : '';
-    return apiCall<PaginatedResponse<SalesReport>>(`/reports/${queryString}`);
+    return apiCall<PaginatedResponse<SalesReport>>(`/sales-reports${queryString}`);
   },
 
   // 영업일지 상세 조회
@@ -240,6 +265,16 @@ export const companyApi = {
     });
   },
 }; 
+
+export const companyFinancialStatusApi = {
+  getByCompanyCode: async (companyCode: string): Promise<CompanyFinancialStatus[]> => {
+    // 회사코드로 필터링 (company__sales_diary_company_code)
+    const params = new URLSearchParams({
+      'company__sales_diary_company_code': companyCode
+    });
+    return apiCall<CompanyFinancialStatus[]>(`/company-financial-status/?${params.toString()}`);
+  },
+};
 
 // 키워드 추출(추천 태그) API
 export async function fetchRecommendedTags(content: string): Promise<string[]> {

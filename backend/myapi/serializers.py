@@ -1,10 +1,16 @@
 from rest_framework import serializers
-from .models import Company, Report, User
+from .models import Company, Report, User, CompanyFinancialStatus
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 class CompanySerializer(serializers.ModelSerializer):
+    username = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), required=False, allow_null=True)
+    username_display = serializers.SerializerMethodField()
     class Meta:
         model = Company
-        fields = '__all__'
+        fields = [f.name for f in Company._meta.fields] + ['username_display']
+
+    def get_username_display(self, obj):
+        return obj.username.name if obj.username else None
 
 class ReportSerializer(serializers.ModelSerializer):
     company_obj = serializers.PrimaryKeyRelatedField(
@@ -96,3 +102,15 @@ class RegisterSerializer(serializers.ModelSerializer):
             role=validated_data.get('role', 'user')
         )
         return user 
+
+class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
+    @classmethod
+    def get_token(cls, user):
+        token = super().get_token(user)
+        token['role'] = user.role
+        return token 
+
+class CompanyFinancialStatusSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CompanyFinancialStatus
+        fields = '__all__' 

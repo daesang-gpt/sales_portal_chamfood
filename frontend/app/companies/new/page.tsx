@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -13,10 +13,14 @@ import Link from "next/link"
 import { companyApi, Company } from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
 
+// User 타입 정의 (간단히 id, name만 사용)
+type User = { id: number; name: string };
+
 export default function NewCompanyPage() {
   const router = useRouter()
   const { toast } = useToast()
   const [loading, setLoading] = useState(false)
+  const [users, setUsers] = useState<User[]>([]);
   const [formData, setFormData] = useState({
     company_name: "",
     sales_diary_company_code: "",
@@ -36,10 +40,25 @@ export default function NewCompanyPage() {
     payment_terms: "",
     customer_classification: "",
     website: "",
-    remarks: ""
+    remarks: "",
+    username: null as number | null
   })
 
-  const handleInputChange = (field: string, value: string) => {
+  // 영업 사원 목록 불러오기
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        const res = await fetch("/api/users/");
+        if (res.ok) {
+          const data = await res.json();
+          setUsers(data);
+        }
+      } catch {}
+    };
+    fetchUsers();
+  }, []);
+
+  const handleInputChange = (field: string, value: string | number | null) => {
     setFormData(prev => ({
       ...prev,
       [field]: value
@@ -62,13 +81,7 @@ export default function NewCompanyPage() {
       setLoading(true)
       
       // 빈 문자열을 undefined로 변환하여 API에 전송하지 않음
-      const cleanData = Object.fromEntries(
-        Object.entries(formData).map(([key, value]) => [
-          key, 
-          value.trim() === "" ? undefined : value.trim()
-        ])
-      )
-
+      const cleanData = { ...formData };
       await companyApi.createCompany(cleanData)
       
       toast({
@@ -172,6 +185,24 @@ export default function NewCompanyPage() {
                   value={formData.established_date}
                   onChange={(e) => handleInputChange("established_date", e.target.value)}
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="username">영업 사원</Label>
+                <Select
+                  value={formData.username !== null ? String(formData.username) : ''}
+                  onValueChange={value => handleInputChange('username', value ? Number(value) : null)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="영업 사원 선택" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">(없음)</SelectItem>
+                    {users.map(user => (
+                      <SelectItem key={user.id} value={String(user.id)}>{user.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </CardContent>
           </Card>

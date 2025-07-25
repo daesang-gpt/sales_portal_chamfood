@@ -14,6 +14,8 @@ import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { companyApi, Company } from "@/lib/api"
 import { toast } from "@/hooks/use-toast"
+// User 타입 정의 (간단히 id, name만 사용)
+type User = { id: number; name: string };
 
 export default function CompanyEditPage() {
   const params = useParams()
@@ -22,6 +24,7 @@ export default function CompanyEditPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [users, setUsers] = useState<User[]>([]);
 
   // 폼 상태
   const [formData, setFormData] = useState({
@@ -43,7 +46,8 @@ export default function CompanyEditPage() {
     payment_terms: '',
     customer_classification: '',
     website: '',
-    remarks: ''
+    remarks: '',
+    username: null as number | null
   })
 
   useEffect(() => {
@@ -74,7 +78,8 @@ export default function CompanyEditPage() {
           payment_terms: companyData.payment_terms || '',
           customer_classification: companyData.customer_classification || '',
           website: companyData.website || '',
-          remarks: companyData.remarks || ''
+          remarks: companyData.remarks || '',
+          username: companyData.username ?? null
         })
       } catch (err) {
         setError('회사 정보를 불러오는 중 오류가 발생했습니다.')
@@ -83,13 +88,24 @@ export default function CompanyEditPage() {
         setLoading(false)
       }
     }
+    // 영업 사원 목록 불러오기
+    const fetchUsers = async () => {
+      try {
+        const res = await fetch("/api/users/");
+        if (res.ok) {
+          const data = await res.json();
+          setUsers(data);
+        }
+      } catch {}
+    };
 
     if (params.id) {
       loadCompany()
+      fetchUsers()
     }
   }, [params.id])
 
-  const handleInputChange = (field: string, value: string) => {
+  const handleInputChange = (field: string, value: string | null | number) => {
     setFormData(prev => ({
       ...prev,
       [field]: value
@@ -113,7 +129,10 @@ export default function CompanyEditPage() {
       }
 
       // API 호출
-      const updatedCompany = await companyApi.updateCompany(Number(params.id), formData)
+      const updatedCompany = await companyApi.updateCompany(Number(params.id), {
+        ...formData,
+        username: formData.username ?? null
+      })
       
       toast({
         title: "성공",
@@ -274,6 +293,23 @@ export default function CompanyEditPage() {
                     placeholder="대표번호"
                   />
                 </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="username">영업 사원</Label>
+                <Select
+                  value={formData.username !== null ? String(formData.username) : ''}
+                  onValueChange={value => handleInputChange('username', value ? Number(value) : null)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="영업 사원 선택" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">(없음)</SelectItem>
+                    {users.map(user => (
+                      <SelectItem key={user.id} value={String(user.id)}>{user.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </CardContent>
           </Card>

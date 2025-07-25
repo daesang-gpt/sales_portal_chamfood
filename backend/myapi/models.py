@@ -46,6 +46,7 @@ class Company(models.Model):
     customer_classification = models.CharField(max_length=50, blank=True, null=True, verbose_name='고객분류')
     website = models.URLField(max_length=200, blank=True, null=True, verbose_name='웹사이트')
     remarks = models.TextField(blank=True, null=True, verbose_name='비고')
+    username = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='영업 사원')
 
     def __str__(self):
         return self.company_name or 'Unknown Company'
@@ -70,3 +71,22 @@ class Report(models.Model):
 
     def __str__(self):
         return f"{self.company} - {self.visitDate}"
+
+class CompanyFinancialStatus(models.Model):
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='financial_statuses', verbose_name='회사')
+    fiscal_year = models.DateField(verbose_name='결산년도')
+    total_assets = models.BigIntegerField(verbose_name='총자산')
+    capital = models.BigIntegerField(verbose_name='자본금')
+    total_equity = models.BigIntegerField(verbose_name='자본총계')
+    revenue = models.BigIntegerField(verbose_name='매출액')
+    operating_income = models.BigIntegerField(verbose_name='영업이익')
+    net_income = models.BigIntegerField(verbose_name='당기순이익')
+
+    class Meta:
+        db_table = 'company_financial_status'
+        verbose_name = '회사매출현황'
+        verbose_name_plural = '회사매출현황들'
+        ordering = ['-fiscal_year', 'company']
+
+    def __str__(self):
+        return f"{self.company.company_name} - {self.fiscal_year}"

@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import Link from 'next/link';
+import { jwtDecode } from 'jwt-decode';
 
 interface LoginResponse {
   success: boolean;
@@ -23,6 +24,19 @@ interface LoginResponse {
   };
 }
 
+interface TokenResponse {
+  access: string;
+  refresh: string;
+}
+
+interface TokenPayload {
+  user_id: number;
+  role: string;
+  exp: number;
+  iat: number;
+  // 필요시 name, department 등 추가
+}
+
 export default function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -36,30 +50,38 @@ export default function LoginPage() {
     setError('');
 
     try {
-      const response = await fetch('http://localhost:8000/api/login/', {
+      const response = await fetch('http://localhost:8000/api/token/', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          id: username,
+          username: username,
           password: password,
         }),
       });
 
-      const data: LoginResponse = await response.json();
-
-      if (data.success && data.access_token) {
-        // JWT 토큰을 localStorage에 저장
-        localStorage.setItem('access_token', data.access_token);
-        localStorage.setItem('refresh_token', data.refresh_token || '');
-        localStorage.setItem('user', JSON.stringify(data.user));
-
-        // 로그인 성공 시 홈페이지로 이동
-        router.push('/');
-      } else {
-        setError(data.message || '로그인에 실패했습니다.');
+      if (!response.ok) {
+        setError('아이디 또는 비밀번호가 올바르지 않습니다.');
+        setIsLoading(false);
+        return;
       }
+
+      const data: TokenResponse = await response.json();
+      // access 토큰에서 사용자 정보 추출
+      const payload: TokenPayload = jwtDecode(data.access);
+      // user 정보 구성 (role, user_id만 기본, 필요시 추가)
+      const user = {
+        id: payload.user_id,
+        name: '', // 필요시 별도 API로 조회
+        department: '',
+        employee_number: '',
+        role: payload.role,
+      };
+      localStorage.setItem('access_token', data.access);
+      localStorage.setItem('refresh_token', data.refresh);
+      localStorage.setItem('user', JSON.stringify(user));
+      router.push('/');
     } catch (err) {
       setError('서버 연결에 실패했습니다.');
     } finally {
