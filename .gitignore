@@ -89,6 +89,8 @@ htmlcov/
 *.dmp
 *.log
 *.trc
+oracle-xe/
+OracleXE213_Win64.zip
 
 # Deployment files
 *.tar.gz
