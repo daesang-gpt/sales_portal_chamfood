@@ -10,6 +10,34 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import Link from 'next/link';
 import { jwtDecode } from 'jwt-decode';
 
+// 환경에 따른 API URL 설정
+const getApiBaseUrl = () => {
+  // 브라우저 환경에서 현재 호스트 확인
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+    const port = window.location.port;
+    console.log('Current hostname:', hostname);
+    console.log('Current port:', port);
+    
+    // 개발 환경 체크 (더 포괄적으로)
+    if (hostname === 'localhost' || 
+        hostname === '127.0.0.1' || 
+        hostname.startsWith('172.28.') ||  // Docker/VM 환경
+        port === '3000') {
+      console.log('Using development API URL: http://127.0.0.1:8000');
+      return 'http://127.0.0.1:8000';
+    }
+    
+    // 그 외의 경우 운영 환경으로 간주
+    console.log('Using production API URL: http://192.168.99.37:8000');
+    return 'http://192.168.99.37:8000';
+  }
+  
+  // 서버 사이드 렌더링 시 개발 환경으로 간주
+  console.log('SSR - Using development API URL: http://127.0.0.1:8000');
+  return 'http://127.0.0.1:8000';
+};
+
 interface LoginResponse {
   success: boolean;
   message: string;
@@ -50,16 +78,23 @@ export default function LoginPage() {
     setError('');
 
     try {
-      const response = await fetch('http://localhost:8000/api/token/', {
+      const apiUrl = `${getApiBaseUrl()}/api/login/`;
+      console.log('Login API URL:', apiUrl);
+      console.log('Login data:', { id: username, password: '***' });
+      
+      const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          username: username,
+          id: username,
           password: password,
         }),
       });
+      
+      console.log('Response status:', response.status);
+      console.log('Response ok:', response.ok);
 
       if (!response.ok) {
         setError('아이디 또는 비밀번호가 올바르지 않습니다.');
@@ -67,20 +102,20 @@ export default function LoginPage() {
         return;
       }
 
-      const data: TokenResponse = await response.json();
-      // access 토큰에서 사용자 정보 추출
-      const payload: TokenPayload = jwtDecode(data.access);
-      // user 정보 구성 (role, user_id만 기본, 필요시 추가)
-      const user = {
-        id: payload.user_id,
-        name: '', // 필요시 별도 API로 조회
-        department: '',
-        employee_number: '',
-        role: payload.role,
-      };
-      localStorage.setItem('access_token', data.access);
-      localStorage.setItem('refresh_token', data.refresh);
-      localStorage.setItem('user', JSON.stringify(user));
+      const data: LoginResponse = await response.json();
+      console.log('Response data:', data);
+      
+      if (data.success && data.access_token && data.user) {
+        console.log('Login successful, storing tokens');
+        localStorage.setItem('access_token', data.access_token);
+        localStorage.setItem('refresh_token', data.refresh_token || '');
+        localStorage.setItem('user', JSON.stringify(data.user));
+      } else {
+        console.log('Login failed:', data.message);
+        setError(data.message || '로그인에 실패했습니다.');
+        setIsLoading(false);
+        return;
+      }
       router.push('/');
     } catch (err) {
       setError('서버 연결에 실패했습니다.');

@@ -10,6 +10,29 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import Link from 'next/link';
 
+// 환경에 따른 API URL 설정
+const getApiBaseUrl = () => {
+  // 브라우저 환경에서 현재 호스트 확인
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+    const port = window.location.port;
+    
+    // 개발 환경 체크 (더 포괄적으로)
+    if (hostname === 'localhost' || 
+        hostname === '127.0.0.1' || 
+        hostname.startsWith('172.28.') ||  // Docker/VM 환경
+        port === '3000') {
+      return 'http://127.0.0.1:8000';
+    }
+    
+    // 그 외의 경우 운영 환경으로 간주
+    return 'http://192.168.99.37:8000';
+  }
+  
+  // 서버 사이드 렌더링 시 개발 환경으로 간주
+  return 'http://127.0.0.1:8000';
+};
+
 interface RegisterResponse {
   success: boolean;
   message: string;
@@ -52,7 +75,7 @@ export default function RegisterPage() {
     setSuccess('');
 
     try {
-      const response = await fetch('http://localhost:8000/api/register/', {
+      const response = await fetch(`${getApiBaseUrl()}/api/register/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

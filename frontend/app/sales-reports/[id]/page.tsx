@@ -55,7 +55,7 @@ export default function SalesReportDetailPage() {
           ordering: "-visitDate",
           page_size: 100, // 충분히 크게 받아서 10개만 보여줌
         })
-        setOtherReports(data.results)
+        setOtherReports((data as any).results)
       } catch (err) {
         setOtherError("같은 회사의 영업일지를 불러오는 중 오류가 발생했습니다.")
       } finally {

@@ -44,7 +44,7 @@ export default function SalesReportsPage() {
         period: periodValue,
         ordering: "-visitDate",
       });
-      setReports(data.results);
+      setReports((data as any).results);
       setTotalCount(data.count);
       setTotalPages(data.total_pages);
       setCurrentPage(data.current_page);

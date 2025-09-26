@@ -46,7 +46,7 @@ export default function CompaniesPage() {
         companyApi.getCompanyStats()
       ])
       
-      setCompanies(companiesData.results)
+      setCompanies((companiesData as any).results)
       setTotalCount(companiesData.count)
       setTotalPages(Math.ceil(companiesData.count / 10))
       setStats(statsData)
@@ -80,7 +80,7 @@ export default function CompaniesPage() {
         setLoading(true)
         setError(null)
         const companiesData = await companyApi.getCompanies({ search: searchTerm }, currentPage)
-        setCompanies(companiesData.results)
+        setCompanies((companiesData as any).results)
         setTotalCount(companiesData.count)
         setTotalPages(Math.ceil(companiesData.count / 10))
       } catch (err) {

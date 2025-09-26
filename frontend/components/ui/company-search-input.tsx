@@ -36,7 +36,7 @@ export function CompanySearchInput({
   const [selectedIndex, setSelectedIndex] = useState(-1)
   const inputRef = useRef<HTMLInputElement>(null)
   const suggestionsRef = useRef<HTMLDivElement>(null)
-  const debounceTimeoutRef = useRef<NodeJS.Timeout>()
+  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // value prop 변경 시 inputValue 동기화
   useEffect(() => {

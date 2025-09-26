@@ -54,8 +54,8 @@ export default function CompanyDetailPage() {
       if (!company?.sales_diary_company_code) return;
       try {
         const data = await companyFinancialStatusApi.getByCompanyCode(company.sales_diary_company_code);
-        const list = Array.isArray(data) ? data : data.results;
-        setFinancialStatus(list.sort((a, b) => b.fiscal_year.localeCompare(a.fiscal_year)));
+        const list = Array.isArray(data) ? data : (data as any).results;
+        setFinancialStatus(list.sort((a: any, b: any) => b.fiscal_year.localeCompare(a.fiscal_year)));
         console.log("setFinancialStatus", data); // 추가
 
       } catch (e) {
@@ -462,7 +462,7 @@ function CompanySalesReportList({ companyId }: { companyId: string }) {
           ordering: "-visitDate",
           page_size: 100,
         });
-        setReports(data.results);
+        setReports((data as any).results);
       } catch (err) {
         setError("영업일지 리스트를 불러오는 중 오류가 발생했습니다.");
       } finally {

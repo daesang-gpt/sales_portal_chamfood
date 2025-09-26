@@ -55,7 +55,7 @@ export default function EditSalesReportPage() {
     try {
       setCompaniesLoading(true)
       const data = await companyApi.getCompanies()
-      setCompanies(data.results) // 반드시 .results로 배열만 저장
+      setCompanies((data as any).results) // 반드시 (data as any).results로 배열만 저장
     } catch (err) {
       // 무시
     } finally {
