@@ -111,3 +111,12 @@ settings_backup.py
 # Deployment files
 *.tar.gz
 *.zip
+
+# SSH Keys (보안)
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+sales_portal_production*
+ssh_config_template.txt
+setup_ssh_key_on_server.md
