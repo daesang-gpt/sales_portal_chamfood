@@ -92,6 +92,22 @@ htmlcov/
 oracle-xe/
 OracleXE213_Win64.zip
 
+# Model cache
+model_cache/
+
+# Test files
+test_*.py
+*_test.py
+simple_test.py
+
+# Export files
+*_export.csv
+*_export.py
+
+# Backup files
+*_backup.py
+settings_backup.py
+
 # Deployment files
 *.tar.gz
 *.zip
