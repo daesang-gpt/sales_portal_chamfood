@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Company, Report, User, CompanyFinancialStatus
+from .models import Company, Report, User, CompanyFinancialStatus, SalesData
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 class CompanySerializer(serializers.ModelSerializer):
@@ -113,4 +113,22 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
 class CompanyFinancialStatusSerializer(serializers.ModelSerializer):
     class Meta:
         model = CompanyFinancialStatus
-        fields = '__all__' 
+        fields = '__all__'
+
+class SalesDataSerializer(serializers.ModelSerializer):
+    company_name = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = SalesData
+        fields = [
+            'id', '매출일자', '코드', '거래처명', '매출부서', '매출담당자', '유통형태', 
+            '상품코드', '상품명', '브랜드', '축종', '부위', '원산지', '축종_부위', 
+            '원산지_축종', '등급', 'Box', '중량_Kg', '매출단가', '매출금액', 
+            '매출이익', '이익율', '매입처', '매입일자', '재고보유일', '수입로컬', 
+            '이관재고여부', '담당자', '매입단가', '매입금액', '지점명', '매출비고', 
+            '매입비고', '이력번호', 'BL번호', 'company_obj', 'created_at', 'company_name'
+        ] 
+        read_only_fields = ['id', 'created_at', 'company_name']
+
+    def get_company_name(self, obj):
+        return obj.company_obj.company_name if obj.company_obj else obj.거래처명 

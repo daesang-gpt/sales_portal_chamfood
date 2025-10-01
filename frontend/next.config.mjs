@@ -15,6 +15,8 @@ const nextConfig = {
   experimental: {
     // 파일 시스템 오류 방지
     optimizePackageImports: [],
+    // Windows 환경에서 파일 시스템 오류 방지
+    esmExternals: 'loose',
   },
   // 웹팩 설정 최적화
   webpack: (config, { dev, isServer }) => {
@@ -31,6 +33,12 @@ const nextConfig = {
         ...config.resolve.fallback,
         fs: false,
         path: false,
+        os: false,
+      };
+      
+      // 파일 시스템 오류 방지를 위한 추가 설정
+      config.infrastructureLogging = {
+        level: 'error',
       };
     }
     return config;

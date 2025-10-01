@@ -5,15 +5,14 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, ComposedChart } from "recharts"
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, ComposedChart, Legend } from "recharts"
 import { ArrowLeft, Edit, Building2, Phone, MapPin, Calendar, DollarSign, Loader2 } from "lucide-react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
-import { companyApi, Company, salesReportApi, SalesReport } from "@/lib/api"
+import { companyApi, Company, salesReportApi, SalesReport, companyFinancialStatusApi, CompanyFinancialStatus, companySalesDataApi } from "@/lib/api"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { isAdmin } from "@/lib/auth"
 import { toast } from "@/hooks/use-toast"
-import { companyFinancialStatusApi, CompanyFinancialStatus } from '@/lib/api'
 
 export default function CompanyDetailPage() {
   const params = useParams()
@@ -24,8 +23,14 @@ export default function CompanyDetailPage() {
   const router = useRouter();
   const [isAdminUser, setIsAdminUser] = useState(false);
   const [financialStatus, setFinancialStatus] = useState<CompanyFinancialStatus[]>([]);
+  const [salesData, setSalesData] = useState<any>(null);
+  const [salesDataLoading, setSalesDataLoading] = useState(false);
+  const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
+    // 클라이언트 사이드 확인
+    setIsClient(true);
+    
     const loadCompany = async () => {
       try {
         setLoading(true)
@@ -42,18 +47,21 @@ export default function CompanyDetailPage() {
 
     if (params.id) {
       loadCompany()
-      setIsAdminUser(isAdmin());
+      // 클라이언트 사이드에서만 isAdmin 체크
+      if (typeof window !== 'undefined') {
+        setIsAdminUser(isAdmin());
+      }
     }
   }, [params.id])
 
   useEffect(() => {
     // 회사매출현황 불러오기
-    console.log("useEffect - company?.sales_diary_company_code", company?.sales_diary_company_code); // 추가
+    console.log("useEffect - company?.company_code_sap", company?.company_code_sap); // 추가
 
     const fetchFinancialStatus = async () => {
-      if (!company?.sales_diary_company_code) return;
+      if (!company?.company_code_sap) return;
       try {
-        const data = await companyFinancialStatusApi.getByCompanyCode(company.sales_diary_company_code);
+        const data = await companyFinancialStatusApi.getByCompanyCode(company.company_code_sap);
         const list = Array.isArray(data) ? data : (data as any).results;
         setFinancialStatus(list.sort((a: any, b: any) => b.fiscal_year.localeCompare(a.fiscal_year)));
         console.log("setFinancialStatus", data); // 추가
@@ -63,10 +71,31 @@ export default function CompanyDetailPage() {
         console.log("setFinancialStatus error", e); // 추가
       }
     };
-    if (company?.sales_diary_company_code) {
+    if (company?.company_code_sap) {
       fetchFinancialStatus();
     }
-  }, [company?.sales_diary_company_code]);
+  }, [company?.company_code_sap]);
+
+  useEffect(() => {
+    // SalesData 불러오기
+    const fetchSalesData = async () => {
+      if (!company?.id) return;
+      try {
+        setSalesDataLoading(true);
+        const data = await companySalesDataApi.getCompanySalesData(company.id);
+        setSalesData(data);
+        console.log("SalesData loaded:", data);
+      } catch (e) {
+        console.log("SalesData error:", e);
+        setSalesData(null);
+      } finally {
+        setSalesDataLoading(false);
+      }
+    };
+    if (company?.id) {
+      fetchSalesData();
+    }
+  }, [company?.id]);
 
   // 데이터 매핑 헬퍼 함수
   const getCompanyDisplayName = (company: Company) => {
@@ -140,7 +169,7 @@ export default function CompanyDetailPage() {
   // 회사 삭제 함수
   const handleDelete = async () => {
     if (!company) return;
-    if (!window.confirm('정말로 이 회사를 삭제하시겠습니까?')) return;
+    if (typeof window !== 'undefined' && !window.confirm('정말로 이 회사를 삭제하시겠습니까?')) return;
     try {
       setLoading(true);
       await companyApi.deleteCompany(company.id);
@@ -183,6 +212,29 @@ export default function CompanyDetailPage() {
 
   console.log('assetChartData', assetChartData);
   console.log('profitChartData', profitChartData);
+
+  // 커스텀 툴팁 컴포넌트 (최근영업실적용)
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (!active || !payload || payload.length === 0) return null;
+    
+    // 원하는 순서로 정렬
+    const orderedPayload = [
+      payload.find((p: any) => p.dataKey === '매출액'),
+      payload.find((p: any) => p.dataKey === '영업이익'),
+      payload.find((p: any) => p.dataKey === '당기순이익')
+    ].filter(Boolean);
+    
+    return (
+      <div className="bg-white/95 border rounded-md p-3 shadow">
+        <div className="text-sm font-medium mb-1">{label}년</div>
+        {orderedPayload.map((entry: any, index: number) => (
+          <div key={index} className="text-xs text-gray-700">
+            <span style={{ color: entry.color }}>●</span> {entry.name}: {entry.value.toLocaleString()} 천원
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   if (loading) {
     return (
@@ -344,88 +396,218 @@ export default function CompanyDetailPage() {
         </Card>
       </div>
 
-      {/* 매출 차트 */}
-      <div className="grid gap-6 md:grid-cols-2">
-        {/* 최근자산규모 그래프 */}
+      {/* 매출 차트 - 재무정보가 있을 때만 표시 */}
+      {isClient && financialStatus.length > 0 ? (
+        <div className="grid gap-6 md:grid-cols-2">
+          {/* 최근자산규모 그래프 */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle>최근자산규모</CardTitle>
+              <span className="text-xs text-muted-foreground">(단위: 천원)</span>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={assetChartData} barCategoryGap={20}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="year" />
+                  <YAxis tickFormatter={v => v.toLocaleString()} width={80} minTickGap={2} tickMargin={8} />
+                  <Tooltip formatter={(v: number) => v.toLocaleString()} />
+                  <Bar dataKey="총자산" fill="#1B3A5D" />
+                  <Bar dataKey="자본금" fill="#4B2991" />
+                  <Bar dataKey="자본총계" fill="#15803D" />
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+          {/* 최근영업실적 그래프 */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle>최근영업실적</CardTitle>
+              <span className="text-xs text-muted-foreground">(단위: 천원)</span>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={220}>
+                <ComposedChart data={profitChartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f1f1" />
+                  <XAxis 
+                    dataKey="year" 
+                    tickFormatter={(value) => `${value}년`}
+                    style={{ fontSize: '12px', fill: '#666' }}
+                  />
+                  <YAxis 
+                    yAxisId="left"
+                    tickFormatter={(value) => value.toLocaleString()}
+                    style={{ fontSize: '11px', fill: '#666' }}
+                    label={{ value: '매출액 (천원)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: '#4F9DDE', fontSize: '12px' } }}
+                  />
+                  <YAxis 
+                    yAxisId="right" 
+                    orientation="right"
+                    tickFormatter={(value) => value.toLocaleString()}
+                    style={{ fontSize: '11px', fill: '#666' }}
+                    label={{ value: '이익 (천원)', angle: 90, position: 'insideRight', style: { textAnchor: 'middle', fill: '#2ca02c', fontSize: '12px' } }}
+                  />
+                  <Tooltip 
+                    content={<CustomTooltip />}
+                  />
+                  {/* 순서: 매출액(Bar) - 영업이익(Line) - 당기순이익(Line) */}
+                  <Bar 
+                    dataKey="매출액" 
+                    fill="#4F9DDE" 
+                    yAxisId="left"
+                    radius={[4, 4, 0, 0]}
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="영업이익" 
+                    stroke="#2ca02c" 
+                    strokeWidth={3}
+                    yAxisId="right"
+                    dot={{ fill: '#2ca02c', strokeWidth: 2, r: 4 }}
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="당기순이익" 
+                    stroke="#ff7f0e" 
+                    strokeWidth={3}
+                    yAxisId="right"
+                    dot={{ fill: '#ff7f0e', strokeWidth: 2, r: 4 }}
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        </div>
+      ) : (
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>최근자산규모</CardTitle>
-            <span className="text-xs text-muted-foreground">(단위: 천원)</span>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={assetChartData} barCategoryGap={20}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="year" />
-                <YAxis tickFormatter={v => v.toLocaleString()} width={80} minTickGap={2} tickMargin={8} />
-                <Tooltip formatter={(v: number) => v.toLocaleString()} />
-                <Bar dataKey="총자산" fill="#1B3A5D" />
-                <Bar dataKey="자본금" fill="#4B2991" />
-                <Bar dataKey="자본총계" fill="#15803D" />
-              </BarChart>
-            </ResponsiveContainer>
+          <CardContent className="flex items-center justify-center py-12">
+            <div className="text-center">
+              <p className="text-lg text-muted-foreground">재무 정보가 없습니다.</p>
+            </div>
           </CardContent>
         </Card>
-        {/* 최근영업실적 그래프 */}
+      )}
+
+      {/* SalesData 차트 - 최근매출추이와 최근판매축종 */}
+      {isClient && salesDataLoading ? (
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>최근영업실적</CardTitle>
-            <span className="text-xs text-muted-foreground">(단위: 천원)</span>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
-              <ComposedChart data={profitChartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f1f1" />
-                <XAxis 
-                  dataKey="year" 
-                  tickFormatter={(value) => `${value}년`}
-                  style={{ fontSize: '12px', fill: '#666' }}
-                />
-                <YAxis 
-                  yAxisId="left"
-                  tickFormatter={(value) => value.toLocaleString()}
-                  style={{ fontSize: '11px', fill: '#666' }}
-                  label={{ value: '매출액 (천원)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: '#4F9DDE', fontSize: '12px' } }}
-                />
-                <YAxis 
-                  yAxisId="right" 
-                  orientation="right"
-                  tickFormatter={(value) => value.toLocaleString()}
-                  style={{ fontSize: '11px', fill: '#666' }}
-                  label={{ value: '이익 (천원)', angle: 90, position: 'insideRight', style: { textAnchor: 'middle', fill: '#2ca02c', fontSize: '12px' } }}
-                />
-                <Tooltip 
-                  formatter={(value: number, name: string) => [value.toLocaleString() + ' 천원', name]}
-                  labelFormatter={(label) => `${label}년`}
-                />
-                {/* 순서: 매출액(Bar) - 영업이익(Line) - 당기순이익(Line) */}
-                <Bar 
-                  dataKey="매출액" 
-                  fill="#4F9DDE" 
-                  yAxisId="left"
-                  radius={[4, 4, 0, 0]}
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="영업이익" 
-                  stroke="#2ca02c" 
-                  strokeWidth={3}
-                  yAxisId="right"
-                  dot={{ fill: '#2ca02c', strokeWidth: 2, r: 4 }}
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="당기순이익" 
-                  stroke="#ff7f0e" 
-                  strokeWidth={3}
-                  yAxisId="right"
-                  dot={{ fill: '#ff7f0e', strokeWidth: 2, r: 4 }}
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
+          <CardContent className="flex items-center justify-center py-12">
+            <div className="flex items-center space-x-2">
+              <Loader2 className="h-6 w-6 animate-spin" />
+              <span>매출 데이터를 불러오는 중...</span>
+            </div>
           </CardContent>
         </Card>
-      </div>
+      ) : isClient && salesData && salesData.total_records > 0 ? (
+        <div className="grid gap-6 md:grid-cols-2">
+          {/* 최근매출추이 그래프 */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle>최근매출추이</CardTitle>
+              <span className="text-xs text-muted-foreground">(단위: 천원)</span>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={300}>
+                <ComposedChart data={salesData.sales_chart_data}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis 
+                    dataKey="month" 
+                    tickFormatter={(value) => value.slice(5)} // YYYY-MM에서 MM만 표시
+                  />
+                  <YAxis 
+                    yAxisId="left"
+                    tickFormatter={(value) => `${(value / 1000).toFixed(0)}`}
+                    tickCount={6}
+                    style={{ fontSize: '11px', fill: '#666' }}
+                  />
+                  <YAxis 
+                    yAxisId="right" 
+                    orientation="right"
+                    tickFormatter={(value) => `${value}%`}
+                    tickCount={6}
+                    style={{ fontSize: '11px', fill: '#666' }}
+                  />
+                  <Tooltip 
+                    formatter={(value: number, name: string) => {
+                      if (name === 'GP') return [`${value}%`, name];
+                      return [value.toLocaleString() + ' 원', name];
+                    }}
+                    labelFormatter={(label) => `${label}월`}
+                    contentStyle={{ fontSize: '12px' }}
+                  />
+                  <Bar dataKey="매출금액" fill="#4F9DDE" yAxisId="left" />
+                  <Bar dataKey="매출이익" fill="#82ca9d" yAxisId="left" />
+                  <Line 
+                    type="monotone" 
+                    dataKey="GP" 
+                    stroke="#ff7f0e" 
+                    strokeWidth={3}
+                    yAxisId="right"
+                    dot={{ fill: '#ff7f0e', strokeWidth: 2, r: 4 }}
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+
+          {/* 최근판매축종 그래프 */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle>최근판매축종</CardTitle>
+              <span className="text-xs text-muted-foreground">최근 6개월 중량(톤)</span>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={salesData.products_chart_data}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis 
+                    dataKey="month" 
+                    tickFormatter={(value) => value.slice(5)} // YYYY-MM에서 MM만 표시
+                  />
+                  <YAxis 
+                    tickFormatter={(value) => `${(value / 1000).toFixed(1)}톤`}
+                    tickCount={6}
+                    style={{ fontSize: '11px', fill: '#666' }}
+                  />
+                  <Tooltip 
+                    formatter={(value: number, name: string) => [`${(value / 1000).toFixed(1)}톤`, name]}
+                    labelFormatter={(label) => `${label}월`}
+                  />
+                  <Legend />
+                  {/* 동적으로 축종별 Line 생성 */}
+                  {salesData.products_chart_data.length > 0 && 
+                    Object.keys(salesData.products_chart_data[0])
+                      .filter(key => key !== 'month')
+                      .map((product, index) => {
+                        const colors = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#84cc16'];
+                        return (
+                          <Line 
+                            key={product}
+                            type="monotone"
+                            dataKey={product} 
+                            stroke={colors[index % colors.length]}
+                            strokeWidth={3}
+                            name={product}
+                            dot={{ fill: colors[index % colors.length], strokeWidth: 2, r: 4 }}
+                          />
+                        );
+                      })
+                  }
+                </LineChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        </div>
+      ) : isClient && salesData && salesData.total_records === 0 ? (
+        <Card>
+          <CardContent className="flex items-center justify-center py-12">
+            <div className="text-center">
+              <p className="text-lg text-muted-foreground">최근 6개월 매출 데이터가 없습니다.</p>
+              <p className="text-sm text-muted-foreground mt-2">SAP 회사코드: {company?.company_code_sap || '없음'}</p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* 참고사항 */}
       {getCompanyNotes(company) !== '-' && (
@@ -440,7 +622,7 @@ export default function CompanyDetailPage() {
       )}
 
       {/* 영업일지 리스트 */}
-      <CompanySalesReportList companyId={company.sales_diary_company_code || ""} />
+      {isClient && <CompanySalesReportList companyId={company.sales_diary_company_code || ""} />}
     </div>
   )
 }
@@ -497,7 +679,7 @@ function CompanySalesReportList({ companyId }: { companyId: string }) {
               <TableBody>
                 {(showAll ? reports : reports.slice(0, 10)).map((r) => (
                   <TableRow key={r.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => router.push(`/sales-reports/${r.id}`)}>
-                    <TableCell>{new Date(r.visitDate).toLocaleDateString('ko-KR')}</TableCell>
+                    <TableCell>{typeof window !== 'undefined' ? new Date(r.visitDate).toLocaleDateString('ko-KR') : r.visitDate}</TableCell>
                     <TableCell>{r.content.slice(0, 40)}{r.content.length > 40 ? '...' : ''}</TableCell>
                     <TableCell>{r.author_name}</TableCell>
                     <TableCell><Badge variant={r.type === "대면" ? "default" : "secondary"}>{r.type}</Badge></TableCell>

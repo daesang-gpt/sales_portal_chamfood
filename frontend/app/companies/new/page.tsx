@@ -41,7 +41,9 @@ export default function NewCompanyPage() {
     customer_classification: "",
     website: "",
     remarks: "",
-    username: null as number | null
+    username: null as number | null,
+    location: "",  // 소재지 추가
+    products: ""   // 사용품목 추가
   })
 
   // 영업 사원 목록 불러오기
@@ -345,6 +347,34 @@ export default function NewCompanyPage() {
                     <SelectItem value="잠재">잠재</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>소재지</Label>
+                <Select value={formData.location} onValueChange={(value) => handleInputChange("location", value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="소재지를 선택하세요" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">(선택 안함)</SelectItem>
+                    <SelectItem value="수도권">수도권</SelectItem>
+                    <SelectItem value="충청권">충청권</SelectItem>
+                    <SelectItem value="강원권">강원권</SelectItem>
+                    <SelectItem value="영남권">영남권</SelectItem>
+                    <SelectItem value="호남권">호남권</SelectItem>
+                    <SelectItem value="기타">기타</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="products">사용품목</Label>
+                <Input
+                  id="products"
+                  value={formData.products}
+                  onChange={(e) => handleInputChange("products", e.target.value)}
+                  placeholder="예: 국내산 닭, 수입산 돼지고기"
+                />
               </div>
             </CardContent>
           </Card>

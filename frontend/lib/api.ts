@@ -9,7 +9,7 @@ const getApiBaseUrl = () => {
     if (hostname === 'localhost' || 
         hostname === '127.0.0.1' || 
         hostname.startsWith('172.28.') ||  // Docker/VM 환경
-        port === '3000') {
+        port.startsWith('300')) {  // 3000, 3001, 3002 등 모든 300x 포트
       return 'http://127.0.0.1:8000/api';
     }
     
@@ -66,6 +66,8 @@ export interface Company {
   remarks?: string;
   username?: number | null; // 영업 사원 (User FK)
   username_display?: string | null; // 영업 사원 이름
+  location?: string; // 소재지
+  products?: string; // 사용품목
 }
 
 export interface CompanyFilters {
@@ -88,53 +90,77 @@ export interface CompanyFinancialStatus {
 
 // API 호출 헬퍼 함수
 async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const token = localStorage.getItem('access_token');
-  
-  const config: RequestInit = {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token && { 'Authorization': `Bearer ${token}` }),
-      ...options.headers,
-    },
-    ...options,
+  const token = (typeof window !== 'undefined') ? localStorage.getItem('access_token') : null;
+
+  const method = (options.method || 'GET').toString().toUpperCase();
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+
+  const baseHeaders: Record<string, string> = {
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
   };
 
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
-  
-  if (!response.ok) {
-    console.error(`API 호출 실패: ${response.status} - ${endpoint}`);
-    console.error('Response:', response);
-    
-    // 응답 본문을 읽어서 더 자세한 오류 정보 제공
-    try {
-      const errorData = await response.json();
-      console.error('Error details:', errorData);
-      // errorData가 객체이고 error 필드가 있으면 그 메시지만 전달
-      if (errorData && typeof errorData === 'object' && errorData.error) {
-        throw new Error(errorData.error);
-      }
-      throw new Error(`API 호출 실패: ${response.status} - ${endpoint}\n${JSON.stringify(errorData, null, 2)}`);
-    } catch (parseError) {
-      throw new Error(`API 호출 실패: ${response.status} - ${endpoint}`);
-    }
+  // 시작 헤더 병합 (사용자 지정 헤더 우선)
+  let headers: HeadersInit = {
+    ...baseHeaders,
+    ...(options.headers as any),
+  };
+
+  // Content-Type은 다음 조건에서만 자동 설정
+  // - 메서드가 GET/HEAD가 아님
+  // - body가 FormData가 아님 (브라우저가 자동 설정)
+  // - 사용자가 이미 Content-Type을 지정하지 않음
+  const hasContentType = !!(headers as any)['Content-Type'] || !!(headers as any)['content-type'];
+  if (method !== 'GET' && method !== 'HEAD' && !isFormData && !hasContentType) {
+    headers = { 'Content-Type': 'application/json', ...headers };
   }
-  
-  // DELETE 요청의 경우 빈 응답이므로 JSON 파싱을 시도하지 않음
-  if (options.method === 'DELETE') {
-    return undefined as T;
-  }
-  
-  // 응답이 비어있는 경우 빈 객체 반환
-  const text = await response.text();
-  if (!text) {
-    return undefined as T;
-  }
-  
+
+  const config: RequestInit = {
+    ...options,
+    headers,
+  };
+
+  const url = `${API_BASE_URL}${endpoint}`;
   try {
-    return JSON.parse(text);
-  } catch (parseError) {
-    console.error('JSON 파싱 오류:', parseError);
-    throw new Error(`응답 파싱 실패: ${endpoint}`);
+    const response = await fetch(url, config);
+  
+    if (!response.ok) {
+      console.error(`API 호출 실패: ${response.status} - ${endpoint}`);
+      console.error('Response:', response);
+      
+      // 응답 본문을 읽어서 더 자세한 오류 정보 제공
+      try {
+        const errorData = await response.json();
+        console.error('Error details:', errorData);
+        if (errorData && typeof errorData === 'object' && (errorData as any).error) {
+          throw new Error((errorData as any).error);
+        }
+        throw new Error(`API 호출 실패: ${response.status} - ${endpoint}\n${JSON.stringify(errorData, null, 2)}`);
+      } catch (parseError) {
+        throw new Error(`API 호출 실패: ${response.status} - ${endpoint}`);
+      }
+    }
+    
+    // DELETE 요청의 경우 빈 응답이므로 JSON 파싱을 시도하지 않음
+    if (options.method === 'DELETE') {
+      return undefined as T;
+    }
+    
+    // 응답이 비어있는 경우 빈 객체 반환
+    const text = await response.text();
+    if (!text) {
+      return undefined as T;
+    }
+    
+    try {
+      return JSON.parse(text);
+    } catch (parseError) {
+      console.error('JSON 파싱 오류:', parseError);
+      throw new Error(`응답 파싱 실패: ${endpoint}`);
+    }
+  } catch (networkError) {
+    console.error('네트워크 호출 오류:', networkError, '\
+요청 URL:', url, '\n옵션:', config);
+    throw new Error('Failed to fetch: 네트워크 또는 CORS 오류가 발생했습니다.');
   }
 }
 
@@ -287,15 +313,165 @@ export const companyApi = {
       body: JSON.stringify({ company_name }),
     });
   },
+
+  // CSV 다운로드
+  downloadReportsCsv: async (): Promise<Blob> => {
+    const token = localStorage.getItem('access_token');
+    const response = await fetch(`${API_BASE_URL}/export/reports/`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      const errorMessage = errorData.error || `HTTP ${response.status}: ${response.statusText}`;
+      throw new Error(errorMessage);
+    }
+    
+    return response.blob();
+  },
+
+  downloadCompaniesCsv: async (): Promise<Blob> => {
+    const token = localStorage.getItem('access_token');
+    const response = await fetch(`${API_BASE_URL}/export/companies/`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      const errorMessage = errorData.error || `HTTP ${response.status}: ${response.statusText}`;
+      throw new Error(errorMessage);
+    }
+    
+    return response.blob();
+  },
+
+  // CSV 업로드
+  uploadReportsCsv: async (file: File): Promise<{
+    message: string;
+    created_count: number;
+    updated_count: number;
+    errors: string[];
+  }> => {
+    const token = localStorage.getItem('access_token');
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    const response = await fetch(`${API_BASE_URL}/import/reports/`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: formData,
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'CSV 업로드에 실패했습니다.');
+    }
+    
+    return response.json();
+  },
+
+  uploadCompaniesCsv: async (file: File): Promise<{
+    message: string;
+    created_count: number;
+    updated_count: number;
+    errors: string[];
+  }> => {
+    const token = localStorage.getItem('access_token');
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    const response = await fetch(`${API_BASE_URL}/import/companies/`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: formData,
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'CSV 업로드에 실패했습니다.');
+    }
+    
+    return response.json();
+  },
+
+  uploadSalesDataCsv: async (file: File): Promise<{
+    message: string;
+    created_count: number;
+    updated_count: number;
+    errors: string[];
+  }> => {
+    console.log('uploadSalesDataCsv 함수 호출됨');
+    const token = localStorage.getItem('access_token');
+    console.log('토큰 존재:', !!token);
+    const formData = new FormData();
+    formData.append('file', file);
+    console.log('API_BASE_URL:', API_BASE_URL);
+    console.log('요청 URL:', `${API_BASE_URL}/import/sales-data/`);
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/import/sales-data/`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData,
+      });
+      
+      console.log('응답 상태:', response.status);
+      console.log('응답 OK:', response.ok);
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('API 오류:', errorData);
+        throw new Error(errorData.error || '매출 데이터 업로드에 실패했습니다.');
+      }
+      
+      const result = await response.json();
+      console.log('성공 결과:', result);
+      return result;
+    } catch (error) {
+      console.error('API 호출 중 오류:', error);
+      throw error;
+    }
+  },
 }; 
 
 export const companyFinancialStatusApi = {
   getByCompanyCode: async (companyCode: string): Promise<CompanyFinancialStatus[]> => {
-    // 회사코드로 필터링 (company__sales_diary_company_code)
+    // SAP 회사코드로 필터링 (company__company_code_sap)
     const params = new URLSearchParams({
-      'company__sales_diary_company_code': companyCode
+      'company__company_code_sap': companyCode
     });
     return apiCall<CompanyFinancialStatus[]>(`/company-financial-status/?${params.toString()}`);
+  },
+};
+
+// 회사별 SalesData API
+export const companySalesDataApi = {
+  getCompanySalesData: async (companyId: number): Promise<{
+    company_name: string;
+    company_code_sap: string;
+    sales_chart_data: Array<{
+      month: string;
+      매출금액: number;
+      매출이익: number;
+      GP: number;
+    }>;
+    products_chart_data: Array<{
+      month: string;
+      [key: string]: number | string; // 축종별 동적 키
+    }>;
+    total_records: number;
+  }> => {
+    return apiCall(`/companies/${companyId}/sales-data/`);
   },
 };
 
@@ -309,4 +485,44 @@ export async function fetchRecommendedTags(content: string): Promise<string[]> {
     }
   );
   return res.keywords;
-} 
+}
+
+// 대시보드 통계 API
+export const dashboardApi = {
+  // 대시보드 주요 지표 통계
+  getDashboardStats: async (): Promise<{
+    thisMonthReports: number;
+    reportsGrowthRate: number;
+    thisMonthNewCompanies: number;
+    totalContacts: number;
+    faceToFaceContacts: number;
+    phoneContacts: number;
+    thisMonthRevenue: number;
+    revenueGrowthRate: number;
+  }> => {
+    return apiCall('/stats/dashboard/');
+  },
+
+  // 대시보드 차트 데이터
+  getDashboardCharts: async (): Promise<{
+    salesData: Array<{
+      name: string;
+      매출액: number;
+      매출수량: number;
+      매출건수: number;
+    }>;
+    channelData: Array<{
+      name: string;
+      value: number;
+      color: string;
+    }>;
+    recentActivities: Array<{
+      company: string;
+      type: string;
+      date: string;
+      author: string;
+    }>;
+  }> => {
+    return apiCall('/charts/dashboard/');
+  },
+}; 

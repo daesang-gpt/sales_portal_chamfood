@@ -89,12 +89,33 @@ export default function EditSalesReportPage() {
     setFormData((prev) => ({ ...prev, [field]: value }))
   }
 
-  const handleCompanyChange = (companyName: string, companyId?: number) => {
+  const handleCompanyChange = async (companyName: string, companyId?: number) => {
     setFormData(prev => ({ 
       ...prev, 
       company: companyName, 
       company_obj: companyId 
     }))
+    
+    // 회사가 선택된 경우 해당 회사의 데이터 불러오기
+    if (companyId) {
+      try {
+        const company = await companyApi.getCompany(companyId);
+        setFormData(prev => ({
+          ...prev,
+          location: company.location || '',
+          products: company.products || ''
+        }));
+      } catch (err) {
+        console.error('회사 정보 불러오기 오류:', err);
+      }
+    } else {
+      // 회사 선택이 해제된 경우 필드 초기화
+      setFormData(prev => ({
+        ...prev,
+        location: '',
+        products: ''
+      }));
+    }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -234,27 +255,27 @@ export default function EditSalesReportPage() {
               </div>
               <div className="space-y-2">
                 <Label>소재지</Label>
-                <Select value={formData.location} onValueChange={value => handleInputChange("location", value)}>
+                <Select value={formData.location || ''} onValueChange={(value) => handleInputChange("location", value)}>
                   <SelectTrigger>
-                    <SelectValue placeholder="소재지 선택" />
+                    <SelectValue placeholder="소재지를 선택하세요" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="수도권">수도권</SelectItem>
                     <SelectItem value="충청권">충청권</SelectItem>
+                    <SelectItem value="강원권">강원권</SelectItem>
                     <SelectItem value="영남권">영남권</SelectItem>
                     <SelectItem value="호남권">호남권</SelectItem>
-                    <SelectItem value="강원권">강원권</SelectItem>
+                    <SelectItem value="기타">기타</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2 md:col-span-2">
+              <div className="space-y-2">
                 <Label htmlFor="products">사용품목</Label>
                 <Input
                   id="products"
-                  value={formData.products}
+                  value={formData.products || ''}
                   onChange={e => handleInputChange("products", e.target.value)}
                   placeholder="예: 국내산 닭, 수입산 돼지고기"
-                  required
                 />
               </div>
               <div className="space-y-2 md:col-span-2">

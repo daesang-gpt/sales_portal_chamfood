@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "build": "next build",
+    "build:clean": "powershell -Command \"if (Test-Path '.next') { Remove-Item -Recurse -Force '.next' }; next build\"",
     "dev": "next dev",
     "dev:clean": "powershell -Command \"if (Test-Path '.next') { Remove-Item -Recurse -Force '.next' }; next dev\"",
     "dev:external": "next dev -H 0.0.0.0 -p 3000",
