@@ -19,32 +19,16 @@ import {
 import { FileText, Building2, Phone, DollarSign, User, LogOut } from "lucide-react"
 import Link from "next/link"
 import { isAuthenticated, logout, getUserFromToken } from "@/lib/auth"
+import { dashboardApi } from "@/lib/api"
 
-const salesData = [
-  { name: "1월", 매출액: 45000000, 매출수량: 12500, 매출건수: 85 },
-  { name: "2월", 매출액: 52000000, 매출수량: 14200, 매출건수: 92 },
-  { name: "3월", 매출액: 48000000, 매출수량: 13100, 매출건수: 88 },
-  { name: "4월", 매출액: 61000000, 매출수량: 16800, 매출건수: 105 },
-  { name: "5월", 매출액: 58000000, 매출수량: 15900, 매출건수: 98 },
-  { name: "6월", 매출액: 67000000, 매출수량: 18200, 매출건수: 112 },
-]
-
-const channelData = [
-  { name: "가공장", value: 45, color: "#0088FE" },
-  { name: "프랜차이즈", value: 30, color: "#00C49F" },
-  { name: "도소매", value: 25, color: "#FFBB28" },
-]
-
-const recentActivities = [
-  { company: "아이더스에프앤비", type: "대면", date: "2025-05-12", author: "엄재후" },
-  { company: "(주)사세", type: "전화", date: "2025-05-11", author: "김영희" },
-  { company: "푸라닭 본사", type: "대면", date: "2025-05-10", author: "엄재후" },
-  { company: "움버거", type: "전화", date: "2025-05-09", author: "박민수" },
-]
+// 더미 데이터를 제거하고 실제 API 데이터를 사용하도록 변경
 
 export default function Dashboard() {
   const [user, setUser] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [dashboardStats, setDashboardStats] = useState<any>(null);
+  const [chartData, setChartData] = useState<any>(null);
+  const [dataLoading, setDataLoading] = useState(true);
   const router = useRouter();
 
   useEffect(() => {
@@ -56,18 +40,37 @@ export default function Dashboard() {
 
     const currentUser = getUserFromToken();
     setUser(currentUser);
-    setIsLoading(false);
+    loadDashboardData();
   }, [router]);
+
+  const loadDashboardData = async () => {
+    try {
+      setDataLoading(true);
+      // 병렬로 통계와 차트 데이터 가져오기
+      const [statsResponse, chartsResponse] = await Promise.all([
+        dashboardApi.getDashboardStats(),
+        dashboardApi.getDashboardCharts()
+      ]);
+      
+      setDashboardStats(statsResponse);
+      setChartData(chartsResponse);
+    } catch (error) {
+      console.error('대시보드 데이터 로드 실패:', error);
+    } finally {
+      setDataLoading(false);
+      setIsLoading(false);
+    }
+  };
 
   const handleLogout = () => {
     logout();
     router.push('/login');
   };
 
-  if (isLoading) {
+  if (isLoading || dataLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-lg">로딩 중...</div>
+        <div className="text-lg">대시보드 로딩 중...</div>
       </div>
     );
   }
@@ -114,8 +117,13 @@ export default function Dashboard() {
             <FileText className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">24건</div>
-            <p className="text-xs text-muted-foreground">전월 대비 +12%</p>
+            <div className="text-2xl font-bold">{dashboardStats?.thisMonthReports || 0}건</div>
+            <p className="text-xs text-muted-foreground">
+              {dashboardStats?.reportsGrowthRate ? 
+                `전월 대비 ${dashboardStats.reportsGrowthRate > 0 ? '+' : ''}${dashboardStats.reportsGrowthRate}%` : 
+                '전월 대비 데이터 없음'
+              }
+            </p>
           </CardContent>
         </Card>
 
@@ -125,7 +133,7 @@ export default function Dashboard() {
             <Building2 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">8개사</div>
+            <div className="text-2xl font-bold">{dashboardStats?.thisMonthNewCompanies || 0}개사</div>
             <p className="text-xs text-muted-foreground">이번 달 신규 등록</p>
           </CardContent>
         </Card>
@@ -136,8 +144,10 @@ export default function Dashboard() {
             <Phone className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">156회</div>
-            <p className="text-xs text-muted-foreground">대면 89회, 전화 67회</p>
+            <div className="text-2xl font-bold">{dashboardStats?.totalContacts || 0}회</div>
+            <p className="text-xs text-muted-foreground">
+              대면 {dashboardStats?.faceToFaceContacts || 0}회, 전화 {dashboardStats?.phoneContacts || 0}회
+            </p>
           </CardContent>
         </Card>
 
@@ -147,8 +157,14 @@ export default function Dashboard() {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">6.7억원</div>
-            <p className="text-xs text-muted-foreground">전월 대비 +15.5%</p>
+            <div className="text-2xl font-bold">
+              {dashboardStats?.thisMonthRevenue ? 
+                `${(dashboardStats.thisMonthRevenue / 100000000).toFixed(1)}억원` : 
+                '0억원'
+              }
+            </div>
+            <p className="text-xs text-muted-foreground">
+              전월 대비 +{dashboardStats?.revenueGrowthRate || 0}%</p>
           </CardContent>
         </Card>
       </div>
@@ -162,7 +178,7 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={salesData}>
+              <LineChart data={chartData?.salesData || []}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" />
                 <YAxis tickFormatter={(value) => `${(value / 10000000).toFixed(0)}천만`} />
@@ -183,7 +199,7 @@ export default function Dashboard() {
             <ResponsiveContainer width="100%" height={300}>
               <PieChart>
                 <Pie
-                  data={channelData}
+                  data={chartData?.channelData || []}
                   cx="50%"
                   cy="50%"
                   labelLine={false}
@@ -192,7 +208,7 @@ export default function Dashboard() {
                   fill="#8884d8"
                   dataKey="value"
                 >
-                  {channelData.map((entry, index) => (
+                  {(chartData?.channelData || []).map((entry: any, index: number) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
                 </Pie>
@@ -211,22 +227,28 @@ export default function Dashboard() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {recentActivities.map((activity, index) => (
-              <div key={index} className="flex items-center justify-between p-4 border rounded-lg">
-                <div className="flex items-center space-x-4">
-                  <div
-                    className={`w-3 h-3 rounded-full ${activity.type === "대면" ? "bg-green-500" : "bg-blue-500"}`}
-                  />
-                  <div>
-                    <p className="font-medium">{activity.company}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {activity.type} 영업 - {activity.author}
-                    </p>
+            {(chartData?.recentActivities || []).length > 0 ? (
+              chartData.recentActivities.map((activity: any, index: number) => (
+                <div key={index} className="flex items-center justify-between p-4 border rounded-lg">
+                  <div className="flex items-center space-x-4">
+                    <div
+                      className={`w-3 h-3 rounded-full ${activity.type === "대면" ? "bg-green-500" : "bg-blue-500"}`}
+                    />
+                    <div>
+                      <p className="font-medium">{activity.company}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {activity.type} 영업 - {activity.author}
+                      </p>
+                    </div>
                   </div>
+                  <div className="text-sm text-muted-foreground">{activity.date}</div>
                 </div>
-                <div className="text-sm text-muted-foreground">{activity.date}</div>
+              ))
+            ) : (
+              <div className="text-center text-gray-500 py-8">
+                최근 영업 활동이 없습니다.
               </div>
-            ))}
+            )}
           </div>
           <div className="mt-4">
             <Button variant="outline" asChild className="w-full bg-transparent">

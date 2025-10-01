@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { isAdmin, isAuthenticated, logout, getUserFromToken } from '@/lib/auth';
+import { companyApi } from '@/lib/api';
 
 export default function AdminPage() {
   const [user, setUser] = useState<any>(null);
@@ -31,6 +32,35 @@ export default function AdminPage() {
   const handleLogout = () => {
     logout();
     router.push('/login');
+  };
+
+  const uploadSalesData = () => {
+    console.log('업로드 함수 호출됨');
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.csv,.xlsx';
+    input.onchange = async (event) => {
+      const file = (event.target as HTMLInputElement).files?.[0];
+      console.log('선택된 파일:', file);
+      if (file) {
+        console.log('파일 업로드 시작:', file.name, file.size);
+        try {
+          console.log('API 호출 시작');
+          const result = await companyApi.uploadSalesDataCsv(file);
+          console.log('업로드 결과:', result);
+          alert(`업로드 완료!\n신규 생성: ${result.created_count}건\n업데이트: ${result.updated_count}건\n\n총 오류: ${result.errors.length}개`);
+          if (result.errors.length > 0) {
+            console.log('업로드 오류:', result.errors);
+          }
+        } catch (error: any) {
+          console.error('업로드 오류:', error);
+          alert(`업로드 실패: ${error.message}`);
+        }
+      } else {
+        console.log('파일이 선택되지 않음');
+      }
+    };
+    input.click();
   };
 
   if (isLoading) {
@@ -138,6 +168,41 @@ export default function AdminPage() {
             </CardHeader>
             <CardContent>
               <Button className="w-full">로그 보기</Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>CSV 데이터 관리</CardTitle>
+              <CardDescription>영업일지와 회사 데이터를 CSV로 다운로드/업로드합니다.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button 
+                className="w-full"
+                onClick={() => router.push('/admin/csv-management')}
+              >
+                CSV 관리
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>매출 데이터 관리</CardTitle>
+              <CardDescription>실제 매출 데이터를 CSV/XLSX 파일로 업로드하고 대시보드 차트에 반영합니다.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                <Button 
+                  className="w-full"
+                  onClick={() => uploadSalesData()}
+                >
+                  매출 데이터 업로드 (CSV/XLSX)
+                </Button>
+                <p className="text-xs text-gray-500 text-center">
+                  필수 컬럼: 매출일자, 거래처명, 매출금액, 매출부서, 매출담당자 등
+                </p>
+              </div>
             </CardContent>
           </Card>
         </div>

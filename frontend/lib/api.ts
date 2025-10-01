@@ -9,7 +9,7 @@ const getApiBaseUrl = () => {
     if (hostname === 'localhost' || 
         hostname === '127.0.0.1' || 
         hostname.startsWith('172.28.') ||  // Docker/VM 환경
-        port === '3000') {
+        port.startsWith('300')) {  // 3000, 3001, 3002 등 모든 300x 포트
       return 'http://127.0.0.1:8000/api';
     }
     
@@ -66,6 +66,8 @@ export interface Company {
   remarks?: string;
   username?: number | null; // 영업 사원 (User FK)
   username_display?: string | null; // 영업 사원 이름
+  location?: string; // 소재지
+  products?: string; // 사용품목
 }
 
 export interface CompanyFilters {
@@ -287,6 +289,135 @@ export const companyApi = {
       body: JSON.stringify({ company_name }),
     });
   },
+
+  // CSV 다운로드
+  downloadReportsCsv: async (): Promise<Blob> => {
+    const token = localStorage.getItem('access_token');
+    const response = await fetch(`${API_BASE_URL}/export/reports/`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      const errorMessage = errorData.error || `HTTP ${response.status}: ${response.statusText}`;
+      throw new Error(errorMessage);
+    }
+    
+    return response.blob();
+  },
+
+  downloadCompaniesCsv: async (): Promise<Blob> => {
+    const token = localStorage.getItem('access_token');
+    const response = await fetch(`${API_BASE_URL}/export/companies/`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      const errorMessage = errorData.error || `HTTP ${response.status}: ${response.statusText}`;
+      throw new Error(errorMessage);
+    }
+    
+    return response.blob();
+  },
+
+  // CSV 업로드
+  uploadReportsCsv: async (file: File): Promise<{
+    message: string;
+    created_count: number;
+    updated_count: number;
+    errors: string[];
+  }> => {
+    const token = localStorage.getItem('access_token');
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    const response = await fetch(`${API_BASE_URL}/import/reports/`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: formData,
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'CSV 업로드에 실패했습니다.');
+    }
+    
+    return response.json();
+  },
+
+  uploadCompaniesCsv: async (file: File): Promise<{
+    message: string;
+    created_count: number;
+    updated_count: number;
+    errors: string[];
+  }> => {
+    const token = localStorage.getItem('access_token');
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    const response = await fetch(`${API_BASE_URL}/import/companies/`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: formData,
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'CSV 업로드에 실패했습니다.');
+    }
+    
+    return response.json();
+  },
+
+  uploadSalesDataCsv: async (file: File): Promise<{
+    message: string;
+    created_count: number;
+    updated_count: number;
+    errors: string[];
+  }> => {
+    console.log('uploadSalesDataCsv 함수 호출됨');
+    const token = localStorage.getItem('access_token');
+    console.log('토큰 존재:', !!token);
+    const formData = new FormData();
+    formData.append('file', file);
+    console.log('API_BASE_URL:', API_BASE_URL);
+    console.log('요청 URL:', `${API_BASE_URL}/import/sales-data/`);
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/import/sales-data/`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData,
+      });
+      
+      console.log('응답 상태:', response.status);
+      console.log('응답 OK:', response.ok);
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('API 오류:', errorData);
+        throw new Error(errorData.error || '매출 데이터 업로드에 실패했습니다.');
+      }
+      
+      const result = await response.json();
+      console.log('성공 결과:', result);
+      return result;
+    } catch (error) {
+      console.error('API 호출 중 오류:', error);
+      throw error;
+    }
+  },
 }; 
 
 export const companyFinancialStatusApi = {
@@ -309,4 +440,44 @@ export async function fetchRecommendedTags(content: string): Promise<string[]> {
     }
   );
   return res.keywords;
-} 
+}
+
+// 대시보드 통계 API
+export const dashboardApi = {
+  // 대시보드 주요 지표 통계
+  getDashboardStats: async (): Promise<{
+    thisMonthReports: number;
+    reportsGrowthRate: number;
+    thisMonthNewCompanies: number;
+    totalContacts: number;
+    faceToFaceContacts: number;
+    phoneContacts: number;
+    thisMonthRevenue: number;
+    revenueGrowthRate: number;
+  }> => {
+    return apiCall('/stats/dashboard/');
+  },
+
+  // 대시보드 차트 데이터
+  getDashboardCharts: async (): Promise<{
+    salesData: Array<{
+      name: string;
+      매출액: number;
+      매출수량: number;
+      매출건수: number;
+    }>;
+    channelData: Array<{
+      name: string;
+      value: number;
+      color: string;
+    }>;
+    recentActivities: Array<{
+      company: string;
+      type: string;
+      date: string;
+      author: string;
+    }>;
+  }> => {
+    return apiCall('/charts/dashboard/');
+  },
+}; 
