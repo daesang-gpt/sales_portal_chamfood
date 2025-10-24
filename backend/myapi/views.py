@@ -1240,7 +1240,6 @@ def upload_sales_data_csv(request):
                 except:
                     errors.append(f"{row_num}행: 매출금액 형식이 올바르지 않습니다.")
                     continue
-
                 # 추가 수치 파싱: 매출이익, 매입금액, 매출단가, 매입단가, 이익율
                 def parse_int_safe(val):
                     try:
