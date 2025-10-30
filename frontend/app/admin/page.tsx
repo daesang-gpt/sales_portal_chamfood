@@ -117,7 +117,12 @@ export default function AdminPage() {
               <CardDescription>전체 사용자 목록을 확인하고 관리합니다.</CardDescription>
             </CardHeader>
             <CardContent>
-              <Button className="w-full">사용자 목록 보기</Button>
+              <Button 
+                className="w-full"
+                onClick={() => router.push('/admin/users')}
+              >
+                사용자 목록 보기
+              </Button>
             </CardContent>
           </Card>
 

@@ -36,30 +36,61 @@ class User(AbstractUser):
 
 
 class Company(models.Model):
-    # CSV 컬럼과 매핑되는 필드들
+    # 필수 필드
+    company_code = models.CharField(max_length=50, unique=True, primary_key=True, verbose_name='회사코드')
     company_name = models.CharField(max_length=200, verbose_name='회사명')
-    sales_diary_company_code = models.CharField(max_length=50, blank=True, null=True, verbose_name='영업일지 회사코드')
-    company_code_sm = models.CharField(max_length=50, blank=True, null=True, verbose_name='SM 회사코드')
-    company_code_sap = models.CharField(max_length=50, blank=True, null=True, verbose_name='SAP 회사코드')
-    company_type = models.CharField(max_length=100, blank=True, null=True, verbose_name='회사유형')
+    
+    # 기본정보
+    customer_classification = models.CharField(
+        max_length=50, 
+        blank=True, 
+        null=True, 
+        choices=[
+            ('기존', '기존'),
+            ('신규', '신규'),
+            ('이탈', '이탈'),
+            ('기타', '기타'),
+        ],
+        verbose_name='고객분류'
+    )
+    company_type = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        choices=[
+            ('개인', '개인'),
+            ('법인', '법인'),
+        ],
+        verbose_name='회사유형'
+    )
+    tax_id = models.CharField(max_length=50, blank=True, null=True, verbose_name='사업자등록번호')
     established_date = models.DateField(blank=True, null=True, verbose_name='설립일')
     ceo_name = models.CharField(max_length=100, blank=True, null=True, verbose_name='대표자명')
-    address = models.CharField(max_length=500, blank=True, null=True, verbose_name='주소')
-    contact_person = models.CharField(max_length=100, blank=True, null=True, verbose_name='담당자')
-    contact_phone = models.CharField(max_length=20, blank=True, null=True, verbose_name='담당자 연락처')
+    head_address = models.CharField(max_length=500, blank=True, null=True, verbose_name='본사 주소')
+    city_district = models.CharField(max_length=100, blank=True, null=True, verbose_name='시/구')
+    processing_address = models.CharField(max_length=500, blank=True, null=True, verbose_name='공장 주소')
     main_phone = models.CharField(max_length=20, blank=True, null=True, verbose_name='대표전화')
-    distribution_type_sap = models.CharField(max_length=100, blank=True, null=True, verbose_name='SAP 유통유형')
     industry_name = models.CharField(max_length=200, blank=True, null=True, verbose_name='업종명')
-    main_product = models.CharField(max_length=200, blank=True, null=True, verbose_name='주요제품')
+    products = models.TextField(blank=True, null=True, verbose_name='주요제품')
+    website = models.URLField(max_length=200, blank=True, null=True, verbose_name='웹사이트')
+    remarks = models.TextField(blank=True, null=True, verbose_name='참고사항')
+    
+    # SAP정보
+    sap_code_type = models.CharField(max_length=50, blank=True, null=True, verbose_name='SAP코드여부')  # 매입, 매출, 매입매출
+    company_code_sap = models.CharField(max_length=50, blank=True, null=True, verbose_name='SAP거래처코드')
+    biz_code = models.CharField(max_length=50, blank=True, null=True, verbose_name='사업')
+    biz_name = models.CharField(max_length=200, blank=True, null=True, verbose_name='사업부')
+    department_code = models.CharField(max_length=50, blank=True, null=True, verbose_name='지점/팀')
+    department = models.CharField(max_length=100, blank=True, null=True, verbose_name='팀명')
+    employee_number = models.CharField(max_length=50, blank=True, null=True, verbose_name='사원번호')
+    employee_name = models.CharField(max_length=100, blank=True, null=True, verbose_name='영업 사원')
+    distribution_type_sap_code = models.CharField(max_length=50, blank=True, null=True, verbose_name='유통형태코드')
+    distribution_type_sap = models.CharField(max_length=100, blank=True, null=True, verbose_name='유통형태')
+    contact_person = models.CharField(max_length=100, blank=True, null=True, verbose_name='거래처 담당자')
+    contact_phone = models.CharField(max_length=20, blank=True, null=True, verbose_name='담당자 연락처')
+    code_create_date = models.DateField(blank=True, null=True, verbose_name='코드생성일')
     transaction_start_date = models.DateField(blank=True, null=True, verbose_name='거래시작일')
     payment_terms = models.CharField(max_length=200, blank=True, null=True, verbose_name='결제조건')
-    customer_classification = models.CharField(max_length=50, blank=True, null=True, verbose_name='고객분류')
-    website = models.URLField(max_length=200, blank=True, null=True, verbose_name='웹사이트')
-    remarks = models.TextField(blank=True, null=True, verbose_name='비고')
-    username = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='영업 사원')
-    # 영업일지에서 이동된 필드들
-    location = models.CharField(max_length=10, choices=LOCATION_CHOICES, blank=True, null=True, verbose_name='소재지')
-    products = models.CharField(max_length=200, blank=True, null=True, verbose_name='사용품목')
 
     def __str__(self):
         return self.company_name or 'Unknown Company'
@@ -70,20 +101,73 @@ class Company(models.Model):
         verbose_name_plural = '회사들'
 
 class Report(models.Model):
-    author = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reports')  # 작성자 (User 모델과 연결)
-    team = models.CharField(max_length=100)    # 팀명 (User의 department에서 자동 설정)
-    visitDate = models.DateField()             # 방문일자
-    company = models.CharField(max_length=100) # 회사명 (Company 모델에서 선택하거나 신규 입력)
-    company_obj = models.ForeignKey(Company, on_delete=models.SET_NULL, null=True, blank=True, related_name='reports')  # Company 모델과 연결 (선택사항)
-    type = models.CharField(max_length=20)     # 영업형태 (대면, 전화 등)
-    location = models.CharField(max_length=10, choices=LOCATION_CHOICES, blank=True, null=True) # 소재지 (드롭다운 선택)
-    products = models.CharField(max_length=200, blank=True, null=True) # 사용품목 (회사에서 가져오지만 저장 시 고정)
-    content = models.TextField()               # 미팅 내용 (이슈사항)
-    tags = models.CharField(max_length=200, blank=True)  # 태그 (콤마로 구분된 문자열)
-    createdAt = models.DateTimeField(auto_now_add=True) # 작성일
+    # 영업단계 선택 옵션
+    SALES_STAGE_CHOICES = [
+        ('초기 컨택', '초기 컨택'),
+        ('협상 진행(니즈 파악)', '협상 진행(니즈 파악)'),
+        ('계약 체결(거래처 등록)', '계약 체결(거래처 등록)'),
+        ('납품 관리', '납품 관리'),
+        ('관계 유지', '관계 유지'),
+    ]
+    
+    # 영업형태 선택 옵션
+    TYPE_CHOICES = [
+        ('대면', '대면'),
+        ('전화', '전화'),
+        ('이메일', '이메일'),
+        ('화상', '화상'),
+    ]
+    
+    # 작성자 관련 (저장 필드)
+    author = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reports', verbose_name='작성자ID')  # 작성자 (User 모델과 연결)
+    author_name = models.CharField(max_length=100, blank=True, null=True, verbose_name='작성자명')  # 작성자명 저장
+    author_department = models.CharField(max_length=100, blank=True, null=True, verbose_name='팀명')  # 팀명 저장
+    
+    # 방문일자
+    visitDate = models.DateField(verbose_name='방문일자')
+    
+    # 회사 관련 (저장 필드)
+    company_obj = models.ForeignKey(Company, on_delete=models.SET_NULL, null=True, blank=True, related_name='reports', verbose_name='회사ID')  # 신규 생성 UI 용 참조
+    # 회사코드 FK (문자열 PK에 연결)
+    company_code = models.ForeignKey(Company, to_field='company_code', db_column='company_code', on_delete=models.SET_NULL, null=True, blank=True, related_name='reports_by_code', verbose_name='회사코드')
+    company_name = models.CharField(max_length=200, blank=True, null=True, verbose_name='회사명')  # 회사명 저장
+    company_city_district = models.CharField(max_length=100, blank=True, null=True, verbose_name='소재지(시/구)')  # 소재지 저장
+    
+    # 영업단계 (신규)
+    sales_stage = models.CharField(
+        max_length=50,
+        choices=SALES_STAGE_CHOICES,
+        blank=True,
+        null=True,
+        verbose_name='영업단계'
+    )
+    
+    # 영업형태
+    type = models.CharField(
+        max_length=20,
+        choices=TYPE_CHOICES,
+        verbose_name='영업형태'
+    )
+    
+    # 사용품목
+    products = models.TextField(blank=True, null=True, verbose_name='사용품목')
+    
+    # 미팅 내용
+    content = models.TextField(verbose_name='미팅 내용')
+    
+    # 태그
+    tags = models.CharField(max_length=200, blank=True, verbose_name='태그')
+    
+    # 작성일
+    createdAt = models.DateTimeField(auto_now_add=True, verbose_name='작성일')
 
     def __str__(self):
-        return f"{self.company} - {self.visitDate}"
+        return f"{self.company_name or 'Unknown'} - {self.visitDate}"
+
+    class Meta:
+        db_table = 'reports'
+        verbose_name = '영업일지'
+        verbose_name_plural = '영업일지들'
 
 class CompanyFinancialStatus(models.Model):
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='financial_statuses', verbose_name='회사')

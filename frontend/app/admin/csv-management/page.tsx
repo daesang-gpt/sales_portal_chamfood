@@ -29,15 +29,20 @@ export default function CsvManagementPage() {
         ? await companyApi.downloadReportsCsv() 
         : await companyApi.downloadCompaniesCsv()
 
-      // 파일 다운로드
+      // 파일 다운로드 (blob URL 생성 및 즉시 해제)
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
       a.download = type === 'reports' ? '영업일지_백업.csv' : '회사_백업.csv'
+      a.style.display = 'none'
       document.body.appendChild(a)
       a.click()
-      document.body.removeChild(a)
-      window.URL.revokeObjectURL(url)
+      
+      // 즉시 정리 (경고 메시지 최소화)
+      setTimeout(() => {
+        document.body.removeChild(a)
+        window.URL.revokeObjectURL(url)
+      }, 100)
 
       toast({
         title: "다운로드 완료",
@@ -273,11 +278,12 @@ export default function CsvManagementPage() {
           <div>
             <h4 className="font-medium mb-2">영업일지 파일 형식 (CSV/XLSX)</h4>
             <p className="text-sm text-muted-foreground mb-2">
-              필수 컬럼: ID, 작성자ID, 작성자명, 팀명, 방문일자, 회사명, 회사ID, 영업형태, 미팅내용, 태그, 작성일
+              필수 컬럼: ID, 작성자ID, 작성자명, 팀명, 방문일자, 회사명, 회사코드, 영업형태, 사용품목, 미팅내용, 태그, 작성일
             </p>
             <p className="text-sm text-muted-foreground">
               • ID가 있으면 업데이트, 없으면 새로 생성됩니다<br/>
-              • 작성자ID와 회사ID는 실제 존재하는 ID여야 합니다<br/>
+              • 작성자ID는 실제 존재하는 사용자 ID여야 합니다<br/>
+              • 회사코드는 실제 존재하는 회사코드(primary key)여야 합니다<br/>
               • 방문일자는 YYYY-MM-DD 형식이어야 합니다
             </p>
           </div>
@@ -285,12 +291,18 @@ export default function CsvManagementPage() {
           <div>
             <h4 className="font-medium mb-2">회사 파일 형식 (CSV/XLSX)</h4>
             <p className="text-sm text-muted-foreground mb-2">
-              필수 컬럼: ID, 회사명, 영업일지회사코드, 영업사원ID, 소재지, 사용품목
+              필수 컬럼: 회사코드, 회사명
+            </p>
+            <p className="text-sm text-muted-foreground mb-2">
+              기본정보 컬럼: 고객분류, 회사유형, 사업자등록번호, 설립일, 대표자명, 본사 주소, 시/구, 공장 주소, 대표전화, 업종명, 주요제품, 웹사이트, 참고사항
+            </p>
+            <p className="text-sm text-muted-foreground mb-2">
+              SAP정보 컬럼: SAP코드여부, SAP거래처코드, 사업, 사업부, 지점/팀, 팀명, 사원번호, 영업 사원, 유통형태코드, 유통형태, 거래처 담당자, 담당자 연락처, 코드생성일, 거래시작일, 결제조건
             </p>
             <p className="text-sm text-muted-foreground">
-              • ID가 있으면 업데이트, 없으면 새로 생성됩니다<br/>
-              • 영업사원ID는 실제 존재하는 사용자 ID여야 합니다<br/>
-              • 소재지와 사용품목은 선택사항입니다
+              • 회사코드가 이미 존재하면 업데이트, 없으면 새로 생성됩니다<br/>
+              • 회사코드와 회사명은 필수 입력 항목입니다<br/>
+              • 날짜 필드는 YYYY-MM-DD 형식이어야 합니다
             </p>
           </div>
         </CardContent>

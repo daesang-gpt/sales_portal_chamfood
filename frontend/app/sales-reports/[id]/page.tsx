@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { ArrowLeft, Edit, FileImage, Loader2, Trash2 } from "lucide-react"
+import { ArrowLeft, ArrowRight, Edit, Loader2, Trash2 } from "lucide-react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useState } from "react"
@@ -46,12 +46,12 @@ export default function SalesReportDetailPage() {
   // 같은 회사의 다른 영업일지 불러오기
   useEffect(() => {
     const fetchOtherReports = async () => {
-      if (!report || !report.company) return;
+      if (!report || !report.company_code) return;
       setOtherLoading(true)
       setOtherError(null)
       try {
         const data = await salesReportApi.getReports({
-          companyId: report.company,
+          companyId: report.company_code,
           ordering: "-visitDate",
           page_size: 100, // 충분히 크게 받아서 10개만 보여줌
         })
@@ -62,16 +62,11 @@ export default function SalesReportDetailPage() {
         setOtherLoading(false)
       }
     }
-    if (report && report.company) {
+    if (report && (report as any).company_code) {
       fetchOtherReports()
     }
   }, [report])
 
-  const handleDownloadImage = () => {
-    // 영업일지를 이미지로 변환하여 다운로드하는 로직
-    // 실제로는 html2canvas 등을 사용하여 구현
-    console.log("영업일지 이미지 다운로드")
-  }
 
   const handleDelete = async () => {
     if (!report) return
@@ -142,10 +137,6 @@ export default function SalesReportDetailPage() {
           <h1 className="text-3xl font-bold">영업일지 상세</h1>
         </div>
         <div className="flex space-x-2">
-          <Button variant="outline" onClick={handleDownloadImage}>
-            <FileImage className="mr-2 h-4 w-4" />
-            이미지 다운로드
-          </Button>
           <Button 
             variant="destructive" 
             onClick={handleDelete}
@@ -170,52 +161,45 @@ export default function SalesReportDetailPage() {
       <Card id="sales-report-content">
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle>영업일지 #{report.id}</CardTitle>
-            <Badge variant={report.type === "대면" ? "default" : "secondary"}>{report.type}</Badge>
+            <div className="flex items-center gap-3">
+              <CardTitle className="text-2xl">{report.company_display || (report as any).company_name || report.company}</CardTitle>
+              <Button variant="ghost" size="sm" asChild disabled={!(report.company_code || (report.company_display || report.company))}>
+                <Link href={report.company_code 
+                  ? `/companies/${report.company_code}` 
+                  : `/companies?search=${encodeURIComponent((report.company_display || report.company || ''))}`
+                }>
+                  회사 정보 바로가기
+                  <ArrowRight className="ml-1 h-4 w-4" />
+                </Link>
+              </Button>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge variant={report.type === "대면" ? "default" : "secondary"}>{report.type}</Badge>
+              <Badge variant="outline">{(report as any).sales_stage || '미지정'}</Badge>
+            </div>
           </div>
-          <CardDescription>
-            {report.visitDate} - {report.author_name} ({report.team_display})
+          <CardDescription className="text-base">
+            {report.visitDate} - {report.author_name} ({report.author_department})
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-4">
-              <div>
-                <h3 className="font-semibold text-sm text-muted-foreground mb-1">작성자</h3>
-                <p className="text-lg">{report.author_name}</p>
-              </div>
-              <div>
-                <h3 className="font-semibold text-sm text-muted-foreground mb-1">팀명</h3>
-                <p className="text-lg">{report.team_display}</p>
-              </div>
-              <div>
-                <h3 className="font-semibold text-sm text-muted-foreground mb-1">방문일자</h3>
-                <p className="text-lg">{report.visitDate}</p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <h3 className="font-semibold text-sm text-muted-foreground mb-1">회사명</h3>
-                <p className="text-lg font-medium">{report.company_display}</p>
-              </div>
-              <div>
-                <h3 className="font-semibold text-sm text-muted-foreground mb-1">소재지</h3>
-                <p className="text-lg">{report.location}</p>
-              </div>
-              <div>
-                <h3 className="font-semibold text-sm text-muted-foreground mb-1">사용품목</h3>
-                <p className="text-lg">{report.products}</p>
-              </div>
+          <div>
+            <h3 className="font-semibold text-lg mb-3">사용품목</h3>
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <pre className="whitespace-pre-wrap text-sm leading-relaxed" style={{ fontFamily: '"Malgun Gothic", "맑은 고딕", sans-serif' }}>
+                {report.products || '작성 내용 없음'}
+              </pre>
             </div>
           </div>
 
           <Separator />
 
+          {/* 본문에서는 영업단계 섹션 제거 (헤더에 표시) */}
+
           <div>
             <h3 className="font-semibold text-lg mb-3">미팅 내용 (이슈사항)</h3>
             <div className="bg-gray-50 p-4 rounded-lg">
-              <pre className="whitespace-pre-wrap text-sm leading-relaxed">{report.content}</pre>
+              <pre className="whitespace-pre-wrap text-sm leading-relaxed" style={{ fontFamily: '"Malgun Gothic", "맑은 고딕", sans-serif' }}>{report.content}</pre>
             </div>
           </div>
 
@@ -266,7 +250,7 @@ export default function SalesReportDetailPage() {
                       <TableRow key={r.id} className={isCurrent ? "bg-gray-200 font-semibold" : "hover:bg-gray-50 cursor-pointer"} onClick={() => !isCurrent && router.push(`/sales-reports/${r.id}`)}>
                         <TableCell>{new Date(r.visitDate).toLocaleDateString('ko-KR')}</TableCell>
                         <TableCell>{r.content.slice(0, 40)}{r.content.length > 40 ? '...' : ''}</TableCell>
-                        <TableCell>{r.author_name}</TableCell>
+                        <TableCell>{(r as any).author_name || ''}</TableCell>
                         <TableCell><Badge variant={r.type === "대면" ? "default" : "secondary"}>{r.type}</Badge></TableCell>
                         <TableCell className="text-center">{isCurrent ? <span className="text-gray-700 font-semibold">현재</span> : <Button size="sm" variant="outline">이동</Button>}</TableCell>
                       </TableRow>

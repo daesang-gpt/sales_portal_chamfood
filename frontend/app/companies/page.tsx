@@ -126,7 +126,7 @@ export default function CompaniesPage() {
     return company.company_name || 'Unknown Company'
   }
   const getSalesPersonName = (company: Company) => {
-    return company.username_display || '-';
+    return company.employee_name || '-';
   }
 
   const getCompanyType = (company: Company) => {
@@ -261,7 +261,7 @@ export default function CompaniesPage() {
             </TableHeader>
             <TableBody>
               {companies.map((company) => (
-                <TableRow key={company.id}>
+                <TableRow key={company.company_code}>
                   <TableCell className="font-medium">
                     {getCompanyDisplayName(company)}
                   </TableCell>
@@ -282,7 +282,7 @@ export default function CompaniesPage() {
                   <TableCell>{getCompanyStartDate(company)}</TableCell>
                   <TableCell>
                     <Button variant="ghost" size="sm" asChild>
-                      <Link href={`/companies/${company.id}`}>
+                      <Link href={`/companies/${company.company_code}`}>
                         <Eye className="h-4 w-4" />
                       </Link>
                     </Button>

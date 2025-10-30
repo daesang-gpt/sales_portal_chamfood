@@ -93,65 +93,103 @@ class ReportViewSet(viewsets.ModelViewSet):
         return queryset.order_by('-visitDate')
 
     def perform_create(self, serializer):
-        # 현재 사용자를 author로 설정
-        serializer.save(author=self.request.user, team=self.request.user.department)
+        # 현재 사용자를 author로 설정하고 작성자명, 팀명 저장
+        user = self.request.user
+        company_obj = serializer.validated_data.get('company_obj')
+        
+        save_kwargs = {
+            'author': user,
+            'author_name': user.name,
+            'author_department': user.department,
+        }
+        
+        # 회사 정보 저장
+        if company_obj:
+            save_kwargs['company_name'] = company_obj.company_name
+            save_kwargs['company_city_district'] = company_obj.city_district
+        
+        serializer.save(**save_kwargs)
     
     def create(self, request, *args, **kwargs):
         """영업일지 생성 시 회사 데이터 이용 로직"""
-        data = request.data.copy()
-        
-        # 회사 관련 데이터 추출
-        company_name = data.get('company', '')
-        company_location = data.get('location', '')
-        company_products = data.get('products', '')
-        
-        company_obj = None
-        
-        # 회사 참조가 있는 경우
-        if data.get('company_obj'):
-            company_obj = Company.objects.get(id=data['company_obj'])
-            # 회사 데이터에서 소재지/사용품목을 가져와서 데이터에 설정
-            data['location'] = company_obj.location or company_location
-            data['products'] = company_obj.products or company_products
-        else:
-            # 기존 회사명으로 검색
-            existing_company = Company.objects.filter(company_name=company_name).first()
-            if existing_company:
-                company_obj = existing_company
-                data['company_obj'] = existing_company.id
-                # 회사 데이터에서 소재지/사용품목을 가져와서 데이터에 설정
-                data['location'] = existing_company.location or company_location
-                data['products'] = existing_company.products or company_products
-            else:
-                # 신규 회사 생성
-                new_company = Company.objects.create(
-                    company_name=company_name,
-                    sales_diary_company_code=f'C{Company.objects.count() + 1:07d}',
-                    customer_classification='잠재',
-                    location=company_location,
-                    products=company_products,
-                    username=request.user
-                )
-                company_obj = new_company
-                data['company_obj'] = new_company.id
-                # 설정된 소재지/사용품목을 데이터에 설정
-                data['location'] = company_location
-                data['products'] = company_products
-        
-        # 회사 데이터 업데이트 (사용자가 소재지/사용품목을 입력한 경우)
-        if company_obj and (company_location or company_products):
-            if company_location:
-                company_obj.location = company_location
-            if company_products:
+        try:
+            data = dict(request.data)
+            
+            # 회사 관련 데이터 추출
+            company_location = data.get('location', '')  # 신규 회사 소재지
+            company_products = data.get('products', '')
+            company_name_input = data.get('company_name', '')  # 회사명 입력 (선택사항, 신규 회사 생성 시 사용)
+            
+            company_obj = None
+            
+            # 회사 참조가 있는 경우 (Company PK는 company_code 문자열)
+            if data.get('company_obj'):
+                try:
+                    company_code = data['company_obj']
+                    company_obj = Company.objects.get(company_code=company_code)
+                    # 회사 데이터에서 사용품목을 가져와서 데이터에 설정
+                    data['products'] = company_obj.products or company_products
+                except Company.DoesNotExist:
+                    print(f"회사를 찾을 수 없습니다: company_code={data['company_obj']}")
+                    return Response({'error': '선택하신 회사를 찾을 수 없습니다.'}, status=status.HTTP_400_BAD_REQUEST)
+            elif company_name_input:
+                # 기존 회사명으로 검색
+                existing_company = Company.objects.filter(company_name=company_name_input).first()
+                if existing_company:
+                    company_obj = existing_company
+                    data['company_obj'] = existing_company.company_code
+                    # 회사 데이터에서 사용품목을 가져와서 데이터에 설정
+                    data['products'] = existing_company.products or company_products
+                else:
+                    # 신규 회사 생성
+                    last_code = Company.objects.filter(company_code__startswith='C').aggregate(
+                        max_code=Max('company_code')
+                    )['max_code']
+                    if last_code and last_code[1:].isdigit():
+                        next_num = int(last_code[1:]) + 1
+                    else:
+                        next_num = 1
+                    new_code = f'C{next_num:07d}'
+                    new_company = Company.objects.create(
+                        company_code=new_code,
+                        company_name=company_name_input,
+                        customer_classification='신규',
+                        products=company_products,
+                        employee_name=request.user.name if request.user else None
+                    )
+                    company_obj = new_company
+                    data['company_obj'] = new_company.company_code
+                    data['products'] = company_products
+            
+            # 회사 데이터 업데이트 (사용자가 사용품목을 입력한 경우)
+            if company_obj and company_products:
                 company_obj.products = company_products
-            company_obj.save()
-        
-        request.data._mutable = True
-        request.data.clear()
-        request.data.update(data)
-        request.data._mutable = False
-        
-        return super().create(request, *args, **kwargs)
+                company_obj.save()
+            
+            # 회사 정보를 데이터에 추가 (저장용)
+            if company_obj:
+                data['company_name'] = company_obj.company_name
+                data['company_city_district'] = company_obj.city_district
+            
+            # read_only 필드 제거 (perform_create에서 설정됨)
+            data.pop('author', None)
+            data.pop('author_name', None)
+            data.pop('author_department', None)
+            data.pop('team', None)
+            data.pop('location', None)  # location은 Report 모델에 없음
+            
+            # serializer를 직접 생성하여 처리
+            serializer = self.get_serializer(data=data)
+            serializer.is_valid(raise_exception=True)
+            self.perform_create(serializer)
+            headers = self.get_success_headers(serializer.data)
+            return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+            
+        except Exception as e:
+            print(f"ReportViewSet create 오류: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return Response({'error': f'영업일지 생성 중 오류가 발생했습니다: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def update(self, request, *args, **kwargs):
         """영업일지 수정 시 회사 데이터 이용 로직"""
@@ -164,13 +202,24 @@ class ReportViewSet(viewsets.ModelViewSet):
             company_obj = instance.company_obj
             if data.get('company_obj'):
                 try:
-                    company_obj = Company.objects.get(id=data['company_obj'])
-                except Company.DoesNotExist:
+                    # company_obj가 company_code인지 id인지 확인
+                    company_code_or_id = data['company_obj']
+                    try:
+                        company_obj = Company.objects.get(company_code=company_code_or_id)
+                    except Company.DoesNotExist:
+                        try:
+                            company_obj = Company.objects.get(id=company_code_or_id)
+                        except Company.DoesNotExist:
+                            pass
+                except:
                     pass
         
+        # 회사 정보 업데이트 (저장용)
+        if company_obj:
+            data['company_name'] = company_obj.company_name
+            data['company_city_district'] = company_obj.city_district
+        
         # 회사 데이터가 있으면 해당 데이터로 설정 (사용자가 입력하지 않았을 때만)
-        if company_obj and not data.get('location') and not instance.location:
-            data['location'] = company_obj.location
         if company_obj and not data.get('products') and not instance.products:
             data['products'] = company_obj.products
         
@@ -182,8 +231,16 @@ class ReportViewSet(viewsets.ModelViewSet):
         return super().update(request, *args, **kwargs)
 
     def perform_update(self, serializer):
-        # 업데이트 시에도 author와 team은 변경하지 않음
-        serializer.save()
+        # 업데이트 시에도 author, author_name, author_department는 변경하지 않음
+        # 회사 정보는 업데이트 가능 (company_obj가 변경되면 company_name, company_city_district도 업데이트)
+        company_obj = serializer.validated_data.get('company_obj', serializer.instance.company_obj)
+        save_kwargs = {}
+        
+        if company_obj:
+            save_kwargs['company_name'] = company_obj.company_name
+            save_kwargs['company_city_district'] = company_obj.city_district
+        
+        serializer.save(**save_kwargs)
 
     def update_with_error_handling(self, request, *args, **kwargs):
         """영업일지 수정 시 더 자세한 오류 처리"""
@@ -322,7 +379,12 @@ def dashboard_stats_view(request):
         else:
             # 일반 사용자는 본인 데이터만
             reports_queryset = Report.objects.filter(author=user)
-            companies_queryset = Company.objects.filter(username=user)
+            # employee_name 필드로 필터링 (username 필드가 제거됨)
+            user_name = (user.name or '').strip() if hasattr(user, 'name') else ''
+            if user_name:
+                companies_queryset = Company.objects.filter(employee_name=user_name)
+            else:
+                companies_queryset = Company.objects.none()  # 사용자 이름이 없으면 빈 쿼리셋
         
         # 1. 이번 달 영업일지 건수
         this_month_reports = reports_queryset.filter(
@@ -419,7 +481,12 @@ def dashboard_charts_data_view(request):
             companies_queryset = Company.objects.all()
         else:
             reports_queryset = Report.objects.filter(author=user)
-            companies_queryset = Company.objects.filter(username=user)
+            # employee_name 필드로 필터링 (username 필드가 제거됨)
+            user_name = (user.name or '').strip() if hasattr(user, 'name') else ''
+            if user_name:
+                companies_queryset = Company.objects.filter(employee_name=user_name)
+            else:
+                companies_queryset = Company.objects.none()  # 사용자 이름이 없으면 빈 쿼리셋
         
         now = timezone.now()
         current_year = now.year
@@ -535,7 +602,7 @@ def dashboard_charts_data_view(request):
             
             for report in recent_reports:
                 recent_activities.append({
-                    'company': report.company,
+                    'company': report.company_name or '알 수 없음',
                     'type': report.type,
                     'date': report.visitDate.strftime('%Y-%m-%d'),
                     'author': report.author.name if report.author else 'Unknown'
@@ -595,7 +662,7 @@ def register_view(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def company_suggest_view(request):
-    """회사명 자동완성을 위한 API"""
+    """회사명 자동완성을 위한 API - 회사명 (시/구) 형식으로 반환"""
     try:
         query = request.GET.get('query', '').strip()
         
@@ -605,13 +672,26 @@ def company_suggest_view(request):
         # 회사명으로 LIKE 검색 (대소문자 구분 없음)
         companies = Company.objects.filter(
             company_name__icontains=query
-        ).values('id', 'company_name')[:10]  # 최대 10개
+        )[:10]  # 최대 10개
         
-        # 응답 형식: [{"id": 1, "name": "삼성식자재"}, {"id": 2, "name": "삼성유통"}]
-        suggestions = [
-            {"id": company['id'], "name": company['company_name']}
-            for company in companies
-        ]
+        # 응답 형식: [{"id": "C0000001", "name": "회사명 (시/구)"}, ...]
+        suggestions = []
+        for company in companies:
+            display_info = []
+            
+            # 시/구 정보만 표시
+            if company.city_district:
+                display_info.append(company.city_district)
+            
+            # 표시 문자열 생성
+            display_name = company.company_name
+            if display_info:
+                display_name += f' ({", ".join(display_info)})'
+            
+            suggestions.append({
+                "id": company.company_code,
+                "name": display_name
+            })
         
         return Response(suggestions, status=status.HTTP_200_OK)
         
@@ -637,9 +717,9 @@ def auto_create_company(request):
     if company:
         serializer = CompanySerializer(company)
         return Response(serializer.data, status=200)
-    # 회사ID 생성: sales_diary_company_code = 'C'+7자리
-    last_code = Company.objects.filter(sales_diary_company_code__startswith='C').aggregate(
-        max_code=Max('sales_diary_company_code')
+    # 회사ID 생성: company_code = 'C'+7자리
+    last_code = Company.objects.filter(company_code__startswith='C').aggregate(
+        max_code=Max('company_code')
     )['max_code']
     if last_code and last_code[1:].isdigit():
         next_num = int(last_code[1:]) + 1
@@ -647,9 +727,9 @@ def auto_create_company(request):
         next_num = 1
     new_code = f'C{next_num:07d}'
     company = Company.objects.create(
+        company_code=new_code,
         company_name=name,
-        sales_diary_company_code=new_code,
-        customer_classification='잠재'
+        customer_classification='신규'
     )
     serializer = CompanySerializer(company)
     return Response(serializer.data, status=201)
@@ -665,16 +745,24 @@ def extract_keywords_view(request):
     - 태그/임베딩은 최초 1회만 캐싱, 속도 개선
     """
     try:
+        print("[키워드 추출 API] 요청 수신됨")
         text = request.data.get('text', '').strip()
+        print(f"[키워드 추출 API] 입력 텍스트 길이: {len(text)}")
         if not text:
             return Response({'error': '텍스트가 필요합니다.'}, status=status.HTTP_400_BAD_REQUEST)
         # 태그 후보 및 임베딩 캐싱 (최초 1회만)
         global TAG_CANDIDATES, TAG_EMBEDDINGS, TAG_MODEL
         if TAG_CANDIDATES is None or TAG_EMBEDDINGS is None or TAG_MODEL is None:
+            print("[키워드 추출 API] 태그 캐싱 시작")
             load_tag_candidates_and_embeddings()
+            print("[키워드 추출 API] 태그 캐싱 완료")
         # 1. 입력 문장에 실제로 등장하는 DB 태그 우선 추출
         direct_tags = [tag for tag in TAG_CANDIDATES if tag and tag in text]
+        print(f"[키워드 추출 API] 직접 매칭된 태그: {direct_tags}")
+        print(f"[키워드 추출 API] DB 태그 후보 수: {len(TAG_CANDIDATES)}")
+        
         # 2. KeyBERT로 후보 추출
+        print("[키워드 추출 API] KeyBERT 추출 시작")
         kw_model = KeyBERT(model=TAG_MODEL)
         keybert_keywords = kw_model.extract_keywords(
             text,
@@ -683,23 +771,45 @@ def extract_keywords_view(request):
             top_n=10  # 기존 20 → 10으로 속도 개선
         )
         candidates = [kw[0] if not isinstance(kw[0], tuple) else ' '.join(kw[0]) for kw in keybert_keywords]
-        candidate_embeddings = TAG_MODEL.encode(candidates, convert_to_tensor=True)
-        matched_tags = set(direct_tags)
-        for i, cand_emb in enumerate(candidate_embeddings):
-            cos_scores = util.pytorch_cos_sim(cand_emb, TAG_EMBEDDINGS)[0]
-            best_idx = int(np.argmax(cos_scores))
-            best_score = float(cos_scores[best_idx])
-            candidate = candidates[i]
-            db_tag = TAG_CANDIDATES[best_idx]
-            if db_tag in text:
-                matched_tags.add(db_tag)
-            elif best_score >= 0.75:
-                matched_tags.add(db_tag)
+        print(f"[키워드 추출 API] KeyBERT 후보: {candidates}")
+        
+        # 항상 KeyBERT 결과를 포함하고, DB 태그가 있을 때만 유사도 매칭 추가
+        result_tags = set(direct_tags)
+        
+        # DB 태그가 있고 많이 매칭되었다면 유사도 매칭 시도
+        if len(TAG_CANDIDATES) > 0 and len(candidates) > 0:
+            candidate_embeddings = TAG_MODEL.encode(candidates, convert_to_tensor=True)
+            for i, cand_emb in enumerate(candidate_embeddings):
+                cos_scores = util.pytorch_cos_sim(cand_emb, TAG_EMBEDDINGS)[0]
+                best_idx = int(np.argmax(cos_scores))
+                best_score = float(cos_scores[best_idx])
+                candidate = candidates[i]
+                db_tag = TAG_CANDIDATES[best_idx]
+                
+                # 유사도가 높거나 텍스트에 직접 포함되면 추가
+                if db_tag in text:
+                    result_tags.add(db_tag)
+                elif best_score >= 0.6:  # 임계값을 0.75에서 0.6으로 낮춤
+                    result_tags.add(db_tag)
+                    print(f"[키워드 추출 API] 유사도 매칭: {candidate} -> {db_tag} (점수: {best_score:.2f})")
+        
+        # KeyBERT 결과도 직접 추가 (중복 제거)
+        for candidate in candidates:
+            if candidate and len(candidate.strip()) > 0:
+                result_tags.add(candidate.strip())
+        
+        # 최종 결과 정리
+        result_tags = [tag for tag in result_tags if tag and len(tag.strip()) > 0][:10]
+        
+        print(f"[키워드 추출 API] 최종 결과: {result_tags}")
         # 최대 10개 반환
         return Response({
-            'keywords': list(matched_tags)[:10]
+            'keywords': result_tags
         }, status=status.HTTP_200_OK)
     except Exception as e:
+        print(f"[키워드 추출 API] 오류 발생: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return Response({
             'error': '키워드 추출 중 오류가 발생했습니다.',
             'detail': str(e)
@@ -734,14 +844,15 @@ class SalesReportListView(ListAPIView):
 
         if company_id:
             queryset = queryset.filter(
-                Q(company_obj__sales_diary_company_code=company_id) |
-                Q(company=company_id)
+                Q(company_obj__company_code=company_id) |
+                Q(company_name=company_id)
             )
         if search:
             queryset = queryset.filter(
-                Q(company__icontains=search) |
+                Q(company_name__icontains=search) |
                 Q(author__username__icontains=search) |
                 Q(author__name__icontains=search) |
+                Q(author_name__icontains=search) |
                 Q(tags__icontains=search)
             )
         if period in ['1m', '3m', '6m']:
@@ -759,12 +870,12 @@ class CompanyFinancialStatusViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         queryset = models.CompanyFinancialStatus.objects.all()
         
-        # 회사 코드로 필터링 (sales_diary_company_code 또는 company_code_sap)
-        company_code = self.request.query_params.get('company__sales_diary_company_code', None)
+        # 회사 코드로 필터링 (company_code 또는 company_code_sap)
+        company_code = self.request.query_params.get('company__company_code', None)
         company_code_sap = self.request.query_params.get('company__company_code_sap', None)
         
         if company_code:
-            queryset = queryset.filter(company__sales_diary_company_code=company_code)
+            queryset = queryset.filter(company__company_code=company_code)
         elif company_code_sap:
             queryset = queryset.filter(company__company_code_sap=company_code_sap)
         
@@ -811,7 +922,11 @@ def download_reports_csv(request):
             return Response({'error': '관리자만 다운로드할 수 있습니다.'}, status=status.HTTP_403_FORBIDDEN)
         
         # 모든 영업일지 데이터 조회
-        reports = Report.objects.select_related('author', 'company_obj').all()
+        # Oracle 타입 변환 오류를 방지하기 위해 필요한 필드만 가져오기
+        reports = Report.objects.only(
+            'id', 'team', 'visitDate', 'company', 'company_obj_id', 'type', 
+            'products', 'content', 'tags', 'createdAt', 'author_id'
+        ).select_related('author').iterator(chunk_size=100)
         
         # CSV 응답 생성
         response = HttpResponse(content_type='text/csv; charset=utf-8-sig')
@@ -822,33 +937,147 @@ def download_reports_csv(request):
         
         # 헤더 작성
         writer.writerow([
-            'ID', '작성자ID', '작성자명', '팀명', '방문일자', '회사명', '회사ID', '영업형태',
-            '소재지', '사용품목', '미팅내용', '태그', '작성일'
+            'ID', '작성자ID', '작성자명', '팀명', '방문일자', '회사명', '회사코드', '영업형태',
+            '사용품목', '미팅내용', '태그', '작성일'
         ])
         
+        # 안전하게 문자열로 변환하는 헬퍼 함수 (Oracle 타입 변환 오류 방지)
+        def safe_str(value, default=''):
+            """값을 안전하게 문자열로 변환"""
+            if value is None:
+                return default
+            try:
+                # 숫자도 문자열로 변환
+                if isinstance(value, (int, float)):
+                    return str(int(value))
+                # Decimal 등도 처리
+                if hasattr(value, '__str__'):
+                    return str(value).strip()
+                return default
+            except:
+                try:
+                    return str(value)
+                except:
+                    return default
+        
         # 데이터 작성
+        row_count = 0
         for report in reports:
-            writer.writerow([
-                report.id,
-                report.author.id if report.author else '',
-                report.author.name if report.author else '',
-                report.team,
-                report.visitDate.strftime('%Y-%m-%d') if report.visitDate else '',
-                report.company,
-                report.company_obj.id if report.company_obj else '',
-                report.type,
-                report.location or '',  # 소재지 필드 추가
-                report.products or '',  # 사용품목 필드 추가
-                report.content,
-                report.tags,
-                report.createdAt.strftime('%Y-%m-%d %H:%M:%S') if report.createdAt else ''
-            ])
+            try:
+                # 객체에서 직접 값 가져오기 (모두 문자열로 안전하게 변환)
+                report_id = safe_str(report.id, '')
+                
+                # author 처리
+                author_id = ''
+                author_name = ''
+                try:
+                    # author_id는 ForeignKey의 실제 값
+                    if hasattr(report, 'author_id'):
+                        author_id_val = report.author_id
+                        if author_id_val is not None:
+                            author_id = safe_str(author_id_val, '')
+                    # author 객체가 로드된 경우
+                    if hasattr(report, 'author') and report.author:
+                        if not author_id and hasattr(report.author, 'id'):
+                            author_id = safe_str(report.author.id, '')
+                        if hasattr(report.author, 'name'):
+                            author_name = safe_str(report.author.name, '')
+                except Exception as e:
+                    logging.warning(f'Report ID {report_id}: author 접근 오류 - {e}')
+                
+                # 기본 필드들 (직접 접근하여 값 가져오기)
+                team = safe_str(report.author_department, '')
+                company_name = safe_str(report.company_name, '')
+                report_type = safe_str(report.type, '')
+                products = safe_str(report.products, '')
+                content = safe_str(report.content, '')
+                tags = safe_str(report.tags, '')
+                
+                # company_obj_id 처리 (Foreign Key이지만 Company의 PK가 company_code(문자열))
+                company_code = ''
+                try:
+                    # 직접 company_obj_id 속성 접근 (문자열 값)
+                    if hasattr(report, 'company_obj_id'):
+                        company_obj_id_val = report.company_obj_id
+                        if company_obj_id_val is not None:
+                            company_code = safe_str(company_obj_id_val, '')
+                except Exception as e:
+                    logging.warning(f'Report ID {report_id}: company_obj_id 접근 오류 - {e}')
+                
+                # 날짜 필드 처리 (문자열로 변환)
+                visit_date = ''
+                try:
+                    if hasattr(report, 'visitDate') and report.visitDate:
+                        visit_date_obj = report.visitDate
+                        if isinstance(visit_date_obj, str):
+                            visit_date = visit_date_obj[:10] if len(visit_date_obj) >= 10 else visit_date_obj
+                        elif hasattr(visit_date_obj, 'strftime'):
+                            visit_date = visit_date_obj.strftime('%Y-%m-%d')
+                        else:
+                            visit_date = safe_str(visit_date_obj, '')
+                except Exception as e:
+                    logging.warning(f'Report ID {report_id}: visitDate 처리 오류 - {e}')
+                
+                # 작성일 처리
+                created_at = ''
+                try:
+                    if hasattr(report, 'createdAt') and report.createdAt:
+                        created_at_obj = report.createdAt
+                        if isinstance(created_at_obj, str):
+                            created_at = created_at_obj[:19] if len(created_at_obj) >= 19 else created_at_obj
+                        elif hasattr(created_at_obj, 'strftime'):
+                            created_at = created_at_obj.strftime('%Y-%m-%d %H:%M:%S')
+                        else:
+                            created_at = safe_str(created_at_obj, '')
+                except Exception as e:
+                    logging.warning(f'Report ID {report_id}: createdAt 처리 오류 - {e}')
+                
+                # 디버깅: 첫 번째 행만 로깅
+                if row_count == 0:
+                    logging.info(f'첫 번째 행 샘플 - ID: {report_id}, 회사명: {company_name}, 내용: {content[:50] if content else "없음"}')
+                
+                # CSV writer에 모든 값을 문자열로 전달
+                writer.writerow([
+                    report_id,
+                    author_id,
+                    author_name,
+                    team,
+                    visit_date,
+                    company_name,
+                    company_code,
+                    report_type,
+                    products,
+                    content,
+                    tags,
+                    created_at
+                ])
+                row_count += 1
+                
+            except Exception as row_error:
+                # 개별 행 처리 오류는 로깅만 하고 계속 진행
+                import traceback
+                error_trace = traceback.format_exc()
+                try:
+                    if isinstance(report, dict):
+                        report_id_for_error = safe_str(report.get('id', ''), 'unknown')
+                    else:
+                        report_id_for_error = safe_str(getattr(report, 'id', ''), 'unknown')
+                except:
+                    report_id_for_error = 'unknown'
+                logging.error(f'영업일지 CSV 다운로드 중 행 처리 오류 (ID: {report_id_for_error}): {row_error}\n{error_trace}')
+                continue
+        
+        logging.info(f'영업일지 CSV 다운로드 완료: {row_count}개 행 처리됨')
         
         return response
         
     except Exception as e:
-        logging.error(f'영업일지 CSV 다운로드 오류: {e}')
-        return Response({'error': '다운로드 중 오류가 발생했습니다.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        import traceback
+        error_trace = traceback.format_exc()
+        logging.error(f'영업일지 CSV 다운로드 오류: {e}\n{error_trace}')
+        return Response({
+            'error': f'다운로드 중 오류가 발생했습니다: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -860,7 +1089,7 @@ def download_companies_csv(request):
             return Response({'error': '관리자만 다운로드할 수 있습니다.'}, status=status.HTTP_403_FORBIDDEN)
         
         # 모든 회사 데이터 조회
-        companies = Company.objects.select_related('username').all()
+        companies = Company.objects.all()
         
         # CSV 응답 생성
         response = HttpResponse(content_type='text/csv; charset=utf-8-sig')
@@ -869,41 +1098,50 @@ def download_companies_csv(request):
         
         writer = csv.writer(response)
         
-        # 헤더 작성
+        # 헤더 작성 (기본정보)
         writer.writerow([
-            'ID', '회사명', '영업일지회사코드', 'SM회사코드', 'SAP회사코드', '회사유형', '설립일', 
-            '대표자명', '주소', '담당자', '담당자연락처', '대표전화', 'SAP유통유형', '업종명', 
-            '주요제품', '거래시작일', '결제조건', '고객분류', '웹사이트', '비고', '영업사원ID', 
-            '영업사원명', '소재지', '사용품목'
+            '회사코드', '회사명', '고객분류', '회사유형', '사업자등록번호', '설립일', '대표자명',
+            '본사 주소', '시/구', '공장 주소', '대표전화', '업종명', '주요제품', '웹사이트', '참고사항',
+            # SAP정보
+            'SAP코드여부', 'SAP거래처코드', '사업', '사업부', '지점/팀', '팀명', '사원번호', '영업 사원',
+            '유통형태코드', '유통형태', '거래처 담당자', '담당자 연락처', '코드생성일', '거래시작일', '결제조건'
         ])
         
         # 데이터 작성
         for company in companies:
             writer.writerow([
-                company.id,
+                # 기본정보
+                company.company_code or '',
                 company.company_name or '',
-                company.sales_diary_company_code or '',
-                company.company_code_sm or '',
-                company.company_code_sap or '',
+                company.customer_classification or '',
                 company.company_type or '',
+                company.tax_id or '',
                 company.established_date.strftime('%Y-%m-%d') if company.established_date else '',
                 company.ceo_name or '',
-                company.address or '',
-                company.contact_person or '',
-                company.contact_phone or '',
+                company.head_address or '',
+                company.city_district or '',
+                company.processing_address or '',
                 company.main_phone or '',
-                company.distribution_type_sap or '',
                 company.industry_name or '',
-                company.main_product or '',
-                company.transaction_start_date.strftime('%Y-%m-%d') if company.transaction_start_date else '',
-                company.payment_terms or '',
-                company.customer_classification or '',
+                company.products or '',
                 company.website or '',
                 company.remarks or '',
-                company.username.id if company.username else '',
-                company.username.name if company.username else '',
-                company.location or '',  # 새로 추가된 필드
-                company.products or ''    # 새로 추가된 필드
+                # SAP정보
+                company.sap_code_type or '',
+                company.company_code_sap or '',
+                company.biz_code or '',
+                company.biz_name or '',
+                company.department_code or '',
+                company.department or '',
+                company.employee_number or '',
+                company.employee_name or '',
+                company.distribution_type_sap_code or '',
+                company.distribution_type_sap or '',
+                company.contact_person or '',
+                company.contact_phone or '',
+                company.code_create_date.strftime('%Y-%m-%d') if company.code_create_date else '',
+                company.transaction_start_date.strftime('%Y-%m-%d') if company.transaction_start_date else '',
+                company.payment_terms or '',
             ])
         
         return response
@@ -915,7 +1153,7 @@ def download_companies_csv(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def upload_reports_csv(request):
-    """영업일지 CSV 파일을 업로드하여 일괄 업데이트/생성"""
+    """영업일지 CSV/TSV 파일을 업로드하여 일괄 업데이트/생성"""
     try:
         # 관리자 권한 확인
         if not hasattr(request.user, 'role') or request.user.role != 'admin':
@@ -924,53 +1162,79 @@ def upload_reports_csv(request):
         if 'file' not in request.FILES:
             return Response({'error': '파일이 필요합니다.'}, status=status.HTTP_400_BAD_REQUEST)
         
+        # 기존 데이터 삭제 여부 확인
+        delete_existing = request.data.get('delete_existing', 'false').lower() == 'true'
+        
         csv_file = request.FILES['file']
         
         # 파일 확장자 확인 및 읽기
         file_extension = csv_file.name.lower().split('.')[-1]
-        if file_extension not in ['csv', 'xlsx']:
-            return Response({'error': 'CSV 또는 XLSX 파일만 업로드 가능합니다.'}, status=status.HTTP_400_BAD_REQUEST)
+        if file_extension not in ['csv', 'xlsx', 'tsv']:
+            return Response({'error': 'CSV, TSV 또는 XLSX 파일만 업로드 가능합니다.'}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            if file_extension == 'csv':
-                df = pd.read_csv(csv_file)
+            if file_extension == 'tsv':
+                # TSV 파일 읽기
+                csv_file.seek(0)  # 파일 포인터를 처음으로
+                df = pd.read_csv(csv_file, sep='\t', encoding='utf-8')
+            elif file_extension == 'csv':
+                df = pd.read_csv(csv_file, encoding='utf-8')
             else:  # xlsx
                 df = pd.read_excel(BytesIO(csv_file.read()))
         except Exception as e:
             return Response({'error': f'파일 읽기 오류: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
         
-        # 필요한 컬럼 확인
-        required_columns = ['ID', '작성자ID', '작성자명', '팀명', '방문일자', '회사명', '회사ID', '영업형태', '소재지', '사용품목', '미팅내용', '태그', '작성일']
-        if not all(col in df.columns for col in required_columns):
-            return Response({'error': '파일에 필요한 컬럼이 없습니다.'}, status=status.HTTP_400_BAD_REQUEST)
+        # 기존 영업일지 삭제
+        if delete_existing:
+            deleted_count = Report.objects.all().delete()[0]
+            logging.info(f'기존 영업일지 {deleted_count}개 삭제됨')
+        else:
+            deleted_count = 0
         
-        updated_count = 0
+        # 필요한 컬럼 확인
+        required_columns = ['작성자ID', '작성자명', '팀명', '방문일자', '회사ID', '회사명', '영업형태', '미팅 내용']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            return Response({'error': f'파일에 필요한 컬럼이 없습니다: {", ".join(missing_columns)}'}, status=status.HTTP_400_BAD_REQUEST)
+        
         created_count = 0
         errors = []
         
         for index, row in df.iterrows():
             try:
-                report_id = int(row['ID']) if pd.notna(row['ID']) else None
-                author_id = int(row['작성자ID']) if pd.notna(row['작성자ID']) else None
-                company_id = int(row['회사ID']) if pd.notna(row['회사ID']) else None
-                
-                # 작성자 확인
+                # 작성자ID (employee_number로 조회)
                 author = None
-                if author_id:
+                author_id_str = str(row['작성자ID']).strip() if pd.notna(row['작성자ID']) else ''
+                if author_id_str:
                     try:
-                        author = User.objects.get(id=author_id)
+                        author = User.objects.get(employee_number=author_id_str)
                     except User.DoesNotExist:
-                        errors.append(f"행 {index + 2}: 작성자가 존재하지 않습니다 (ID: {author_id})")
+                        errors.append(f"행 {index + 2}: 작성자를 찾을 수 없습니다 (작성자ID: {author_id_str})")
+                        continue
+                    except User.MultipleObjectsReturned:
+                        author = User.objects.filter(employee_number=author_id_str).first()
+                
+                if not author:
+                    errors.append(f"행 {index + 2}: 작성자 정보가 없습니다")
+                    continue
+                
+                # 작성자 정보 저장 (TSV에서 직접 가져오거나 User에서)
+                author_name = row['작성자명'] if pd.notna(row.get('작성자명')) else (author.name if author else '')
+                author_department = row['팀명'] if pd.notna(row.get('팀명')) else (author.department if author else '')
+                
+                # 회사ID (company_code로 조회)
+                company_obj = None
+                company_id_str = str(row['회사ID']).strip() if pd.notna(row['회사ID']) else ''
+                if company_id_str:
+                    try:
+                        company_obj = Company.objects.get(company_code=company_id_str)
+                    except Company.DoesNotExist:
+                        errors.append(f"행 {index + 2}: 회사를 찾을 수 없습니다 (회사ID: {company_id_str})")
                         continue
                 
-                # 회사 확인
-                company_obj = None
-                if company_id:
-                    try:
-                        company_obj = Company.objects.get(id=company_id)
-                    except Company.DoesNotExist:
-                        errors.append(f"행 {index + 2}: 회사가 존재하지 않습니다 (ID: {company_id})")
-                        continue
+                # 회사 정보 저장 (TSV에서 직접 가져오거나 Company에서)
+                company_name = row['회사명'] if pd.notna(row.get('회사명')) else (company_obj.company_name if company_obj else '')
+                company_city_district = row.get('소재지(시/구)', '') if pd.notna(row.get('소재지(시/구)', '')) else (company_obj.city_district if company_obj else '')
                 
                 # 날짜 변환
                 visit_date = None
@@ -978,53 +1242,80 @@ def upload_reports_csv(request):
                     try:
                         visit_date = pd.to_datetime(row['방문일자']).date()
                     except:
-                        errors.append(f"행 {index + 2}: 방문일자 형식이 올바르지 않습니다")
+                        errors.append(f"행 {index + 2}: 방문일자 형식이 올바르지 않습니다: {row['방문일자']}")
                         continue
                 
-                # 기존 영업일지 업데이트 또는 새로 생성
-                if report_id and Report.objects.filter(id=report_id).exists():
-                    report = Report.objects.get(id=report_id)
-                    report.author = author
-                    report.team = row['팀명'] if pd.notna(row['팀명']) else ''
-                    report.visitDate = visit_date
-                    report.company = row['회사명'] if pd.notna(row['회사명']) else ''
-                    report.company_obj = company_obj
-                    report.type = row['영업형태'] if pd.notna(row['영업형태']) else ''
-                    report.location = row['소재지'] if pd.notna(row['소재지']) else ''
-                    report.products = row['사용품목'] if pd.notna(row['사용품목']) else ''
-                    report.content = row['미팅내용'] if pd.notna(row['미팅내용']) else ''
-                    report.tags = row['태그'] if pd.notna(row['태그']) else ''
-                    report.save()
-                    updated_count += 1
-                else:
-                    Report.objects.create(
-                        author=author,
-                        team=row['팀명'] if pd.notna(row['팀명']) else '',
-                        visitDate=visit_date,
-                        company=row['회사명'] if pd.notna(row['회사명']) else '',
-                        company_obj=company_obj,
-                        type=row['영업형태'] if pd.notna(row['영업형태']) else '',
-                        location=row['소재지'] if pd.notna(row['소재지']) else '',
-                        products=row['사용품목'] if pd.notna(row['사용품목']) else '',
-                        content=row['미팅내용'] if pd.notna(row['미팅내용']) else '',
-                        tags=row['태그'] if pd.notna(row['태그']) else ''
-                    )
-                    created_count += 1
+                # 작성일 변환 (TSV의 작성일을 createdAt에 사용, 시간은 00:00:00으로)
+                created_at = None
+                if '작성일' in row and pd.notna(row['작성일']) and str(row['작성일']).strip():
+                    try:
+                        # 날짜를 datetime으로 변환하고 시간을 00:00:00으로 설정
+                        date_obj = pd.to_datetime(row['작성일']).date()
+                        from django.utils import timezone
+                        import datetime
+                        created_at = timezone.make_aware(datetime.datetime.combine(date_obj, datetime.time.min))
+                    except:
+                        pass
+                
+                # 영업단계
+                sales_stage = None
+                if '영업단계' in row and pd.notna(row['영업단계']) and str(row['영업단계']).strip():
+                    sales_stage_str = str(row['영업단계']).strip()
+                    # choices에 있는지 확인
+                    valid_stages = [choice[0] for choice in Report.SALES_STAGE_CHOICES]
+                    if sales_stage_str in valid_stages:
+                        sales_stage = sales_stage_str
+                
+                # 영업형태 검증
+                type_str = str(row['영업형태']).strip() if pd.notna(row['영업형태']) else ''
+                valid_types = [choice[0] for choice in Report.TYPE_CHOICES]
+                if type_str not in valid_types:
+                    errors.append(f"행 {index + 2}: 영업형태가 올바르지 않습니다: {type_str}")
+                    continue
+                
+                # 영업일지 생성
+                report_data = {
+                    'author': author,
+                    'author_name': author_name,
+                    'author_department': author_department,
+                    'visitDate': visit_date,
+                    'company_obj': company_obj,
+                    'company_name': company_name,
+                    'company_city_district': company_city_district,
+                    'sales_stage': sales_stage,
+                    'type': type_str,
+                    'products': str(row['사용품목']).strip() if pd.notna(row.get('사용품목')) else '',
+                    'content': str(row['미팅 내용']).strip() if pd.notna(row.get('미팅 내용')) else '',
+                    'tags': str(row['태그']).strip() if pd.notna(row.get('태그')) else '',
+                }
+                
+                report = Report.objects.create(**report_data)
+                
+                # 작성일이 있으면 업데이트 (시간은 00:00:00으로)
+                if created_at:
+                    report.createdAt = created_at
+                    report.save(update_fields=['createdAt'])
+                
+                created_count += 1
                     
             except Exception as e:
                 errors.append(f"행 {index + 2}: {str(e)}")
+                import traceback
+                logging.error(f"행 {index + 2} 오류 상세: {traceback.format_exc()}")
                 continue
         
         return Response({
-            'message': f'영업일지 업로드 완료: {created_count}개 생성, {updated_count}개 업데이트',
+            'message': f'영업일지 업로드 완료: {created_count}개 생성, 기존 데이터 {deleted_count}개 삭제됨',
             'created_count': created_count,
-            'updated_count': updated_count,
-            'errors': errors[:10]  # 최대 10개 오류만 반환
+            'deleted_count': deleted_count,
+            'errors': errors[:20]  # 최대 20개 오류만 반환
         })
         
     except Exception as e:
-        logging.error(f'영업일지 CSV 업로드 오류: {e}')
-        return Response({'error': '업로드 중 오류가 발생했습니다.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        logging.error(f'영업일지 CSV/TSV 업로드 오류: {e}')
+        import traceback
+        logging.error(traceback.format_exc())
+        return Response({'error': f'업로드 중 오류가 발생했습니다: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -1053,83 +1344,82 @@ def upload_companies_csv(request):
         except Exception as e:
             return Response({'error': f'파일 읽기 오류: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
         
-        # 필요한 컬럼 확인
-        required_columns = ['ID', '회사명', '영업일지회사코드', '영업사원ID', '소재지', '사용품목']
+        # 필요한 컬럼 확인 (필수: 회사코드, 회사명)
+        required_columns = ['회사코드', '회사명']
         if not all(col in df.columns for col in required_columns):
-            return Response({'error': '파일에 필요한 컬럼이 없습니다.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': '파일에 필수 컬럼(회사코드, 회사명)이 없습니다.'}, status=status.HTTP_400_BAD_REQUEST)
         
         updated_count = 0
         created_count = 0
         errors = []
         
+        def safe_get_value(row, col_name, default=None):
+            """안전하게 컬럼 값 가져오기 (빈 문자열은 None으로 변환)"""
+            if col_name in df.columns and pd.notna(row[col_name]):
+                value = str(row[col_name]).strip()
+                return value if value else None
+            return default
+        
+        def safe_get_date(row, col_name):
+            """날짜 필드 안전하게 가져오기"""
+            if col_name in df.columns and pd.notna(row[col_name]):
+                try:
+                    return pd.to_datetime(row[col_name]).date()
+                except:
+                    return None
+            return None
+        
         for index, row in df.iterrows():
             try:
-                company_id = int(row['ID']) if pd.notna(row['ID']) else None
-                sales_person_id = int(row['영업사원ID']) if pd.notna(row['영업사원ID']) else None
+                company_code = safe_get_value(row, '회사코드')
+                company_name = safe_get_value(row, '회사명')
                 
-                # 영업사원 확인
-                sales_person = None
-                if sales_person_id:
-                    try:
-                        sales_person = User.objects.get(id=sales_person_id)
-                    except User.DoesNotExist:
-                        errors.append(f"행 {index + 2}: 영업사원이 존재하지 않습니다 (ID: {sales_person_id})")
-                        continue
+                if not company_code or not company_name:
+                    errors.append(f"행 {index + 2}: 회사코드와 회사명은 필수입니다.")
+                    continue
                 
                 # 기존 회사 업데이트 또는 새로 생성
-                if company_id and Company.objects.filter(id=company_id).exists():
-                    company = Company.objects.get(id=company_id)
-                    company.company_name = row['회사명'] if pd.notna(row['회사명']) else ''
-                    company.sales_diary_company_code = row['영업일지회사코드'] if pd.notna(row['영업일지회사코드']) else ''
-                    company.username = sales_person
-                    company.location = row['소재지'] if pd.notna(row['소재지']) else ''
-                    company.products = row['사용품목'] if pd.notna(row['사용품목']) else ''
-                    
-                    # 추가 필드들도 업데이트 (있는 경우에만)
-                    if 'SM회사코드' in df.columns:
-                        company.company_code_sm = row['SM회사코드'] if pd.notna(row['SM회사코드']) else ''
-                    if 'SAP회사코드' in df.columns:
-                        company.company_code_sap = row['SAP회사코드'] if pd.notna(row['SAP회사코드']) else ''
-                    if '회사유형' in df.columns:
-                        company.company_type = row['회사유형'] if pd.notna(row['회사유형']) else ''
-                    if '설립일' in df.columns and pd.notna(row['설립일']):
-                        try:
-                            company.established_date = pd.to_datetime(row['설립일']).date()
-                        except:
-                            pass
-                    if '대표자명' in df.columns:
-                        company.ceo_name = row['대표자명'] if pd.notna(row['대표자명']) else ''
-                    if '주소' in df.columns:
-                        company.address = row['주소'] if pd.notna(row['주소']) else ''
-                    if '담당자' in df.columns:
-                        company.contact_person = row['담당자'] if pd.notna(row['담당자']) else ''
-                    if '담당자연락처' in df.columns:
-                        company.contact_phone = row['담당자연락처'] if pd.notna(row['담당자연락처']) else ''
-                    if '대표전화' in df.columns:
-                        company.main_phone = row['대표전화'] if pd.notna(row['대표전화']) else ''
-                    if '업종명' in df.columns:
-                        company.industry_name = row['업종명'] if pd.notna(row['업종명']) else ''
-                    if '주요제품' in df.columns:
-                        company.main_product = row['주요제품'] if pd.notna(row['주요제품']) else ''
-                    if '고객분류' in df.columns:
-                        company.customer_classification = row['고객분류'] if pd.notna(row['고객분류']) else ''
-                    if '비고' in df.columns:
-                        company.remarks = row['비고'] if pd.notna(row['비고']) else ''
-                    
-                    company.save()
-                    updated_count += 1
-                else:
-                    Company.objects.create(
-                        company_name=row['회사명'] if pd.notna(row['회사명']) else '',
-                        sales_diary_company_code=row['영업일지회사코드'] if pd.notna(row['영업일지회사코드']) else '',
-                        username=sales_person,
-                        location=row['소재지'] if pd.notna(row['소재지']) else '',
-                        products=row['사용품목'] if pd.notna(row['사용품목']) else '',
-                        company_type=row['회사유형'] if pd.notna(row['회사유형']) and '회사유형' in df.columns else '',
-                        industry_name=row['업종명'] if pd.notna(row['업종명']) and '업종명' in df.columns else '',
-                        customer_classification=row['고객분류'] if pd.notna(row['고객분류']) and '고객분류' in df.columns else '잠재'
-                    )
+                company, created = Company.objects.update_or_create(
+                    company_code=company_code,
+                    defaults={
+                        'company_name': company_name,
+                        # 기본정보
+                        'customer_classification': safe_get_value(row, '고객분류'),
+                        'company_type': safe_get_value(row, '회사유형'),
+                        'tax_id': safe_get_value(row, '사업자등록번호'),
+                        'established_date': safe_get_date(row, '설립일'),
+                        'ceo_name': safe_get_value(row, '대표자명'),
+                        'head_address': safe_get_value(row, '본사 주소'),
+                        'city_district': safe_get_value(row, '시/구'),
+                        'processing_address': safe_get_value(row, '공장 주소'),
+                        'main_phone': safe_get_value(row, '대표전화'),
+                        'industry_name': safe_get_value(row, '업종명'),
+                        'products': safe_get_value(row, '주요제품'),
+                        'website': safe_get_value(row, '웹사이트'),
+                        'remarks': safe_get_value(row, '참고사항'),
+                        # SAP정보
+                        'sap_code_type': safe_get_value(row, 'SAP코드여부'),
+                        'company_code_sap': safe_get_value(row, 'SAP거래처코드'),
+                        'biz_code': safe_get_value(row, '사업'),
+                        'biz_name': safe_get_value(row, '사업부'),
+                        'department_code': safe_get_value(row, '지점/팀'),
+                        'department': safe_get_value(row, '팀명'),
+                        'employee_number': safe_get_value(row, '사원번호'),
+                        'employee_name': safe_get_value(row, '영업 사원'),
+                        'distribution_type_sap_code': safe_get_value(row, '유통형태코드'),
+                        'distribution_type_sap': safe_get_value(row, '유통형태'),
+                        'contact_person': safe_get_value(row, '거래처 담당자'),
+                        'contact_phone': safe_get_value(row, '담당자 연락처'),
+                        'code_create_date': safe_get_date(row, '코드생성일'),
+                        'transaction_start_date': safe_get_date(row, '거래시작일'),
+                        'payment_terms': safe_get_value(row, '결제조건'),
+                    }
+                )
+                
+                if created:
                     created_count += 1
+                else:
+                    updated_count += 1
                     
             except Exception as e:
                 errors.append(f"행 {index + 2}: {str(e)}")
@@ -1287,7 +1577,7 @@ def upload_sales_data_csv(request):
                     # 거래처명으로 회사 찾기
                     company_obj = Company.objects.filter(
                         Q(company_name__icontains=거래처명) |
-                        Q(sales_diary_company_code__contains=거래처명)
+                        Q(company_code__contains=거래처명)
                     ).first()
                 except:
                     pass
@@ -1369,11 +1659,82 @@ def upload_sales_data_csv(request):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
+def get_company_unique_products(request, company_id):
+    """특정 회사의 판매데이터에서 유니크한 상품명 조회"""
+    try:
+        # 회사 정보 조회 (company_code로 조회)
+        try:
+            company = Company.objects.get(company_code=company_id)
+        except Company.DoesNotExist:
+            # 기존 id로도 시도 (하위 호환성)
+            company = Company.objects.get(pk=company_id)
+        
+        # 여러 방법으로 SalesData 찾기
+        sales_data_qs = SalesData.objects.none()
+        matched_by = None
+        
+        # 방법 1: company_obj로 직접 연결된 데이터
+        if company:
+            sales_data_qs = SalesData.objects.filter(company_obj=company)
+            if sales_data_qs.exists():
+                matched_by = 'company_obj'
+        
+        # 방법 2: SAP 회사 코드로 매칭 (가장 정확한 방법)
+        if not sales_data_qs.exists() and company.company_code_sap:
+            sales_data_qs = SalesData.objects.filter(
+                코드=company.company_code_sap
+            )
+            if sales_data_qs.exists():
+                matched_by = 'sap_code'
+        
+        # 방법 3: 회사 코드로 매칭
+        if not sales_data_qs.exists() and company.company_code:
+            sales_data_qs = SalesData.objects.filter(
+                코드=company.company_code
+            )
+            if sales_data_qs.exists():
+                matched_by = 'company_code'
+        
+        # 방법 4: 거래처명으로 매칭
+        if not sales_data_qs.exists():
+            sales_data_qs = SalesData.objects.filter(
+                거래처명__icontains=company.company_name
+            )
+            if sales_data_qs.exists():
+                matched_by = 'company_name'
+        
+        # 유니크한 상품명 조회
+        unique_products = sales_data_qs.values_list('상품명', flat=True).distinct()
+        
+        # None 값 제거 및 필터링
+        products = [p for p in unique_products if p and p.strip()]
+        
+        return Response({
+            'products': products,
+            'count': len(products),
+            'matched_by': matched_by or 'none'
+        }, status=status.HTTP_200_OK)
+        
+    except Company.DoesNotExist:
+        return Response({
+            'error': '회사를 찾을 수 없습니다.'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({
+            'error': f'데이터 조회 중 오류가 발생했습니다: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def get_company_sales_data(request, company_id):
     """특정 회사의 최근 6개월 SalesData 조회"""
     try:
-        # 회사 정보 조회
-        company = Company.objects.get(id=company_id)
+        # 회사 정보 조회 (company_code로 조회)
+        try:
+            company = Company.objects.get(company_code=company_id)
+        except Company.DoesNotExist:
+            # 기존 id로도 시도 (하위 호환성)
+            company = Company.objects.get(pk=company_id)
         company_code_sap = company.company_code_sap
         
         if not company_code_sap:
@@ -1493,4 +1854,17 @@ def get_company_sales_data(request, company_id):
     except Exception as e:
         return Response({
             'error': f'데이터 조회 중 오류가 발생했습니다: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def users_list_view(request):
+    """사용자 목록을 반환하는 API"""
+    try:
+        users = User.objects.all().order_by('id')
+        serializer = UserSerializer(users, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({
+            'error': f'사용자 목록 조회 중 오류가 발생했습니다: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

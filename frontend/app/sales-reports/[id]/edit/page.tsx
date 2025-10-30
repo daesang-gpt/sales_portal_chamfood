@@ -35,9 +35,9 @@ export default function EditSalesReportPage() {
   const [companiesLoading, setCompaniesLoading] = useState(true)
   const [formData, setFormData] = useState({
     company: "",
-    company_obj: undefined as number | null | undefined,
+    company_obj: undefined as string | null | undefined, // company_code (string)
+    sales_stage: "",
     type: "",
-    location: "",
     products: "",
     content: "",
     tags: "",
@@ -69,10 +69,10 @@ export default function EditSalesReportPage() {
       setError(null)
       const report = await salesReportApi.getReport(Number(params.id))
       setFormData({
-        company: report.company_display, // 회사명으로 표시
-        company_obj: report.company_obj,
+        company: report.company_display || report.company, // 표시명 우선
+        company_obj: report.company_code || undefined,
+        sales_stage: (report as any).sales_stage || "",
         type: report.type,
-        location: report.location,
         products: report.products,
         content: report.content,
         tags: report.tags,
@@ -93,16 +93,15 @@ export default function EditSalesReportPage() {
     setFormData(prev => ({ 
       ...prev, 
       company: companyName, 
-      company_obj: companyId 
+      company_obj: (companyId as unknown as string | undefined)
     }))
     
     // 회사가 선택된 경우 해당 회사의 데이터 불러오기
     if (companyId) {
       try {
-        const company = await companyApi.getCompany(companyId);
+        const company = await companyApi.getCompany(String(companyId));
         setFormData(prev => ({
           ...prev,
-          location: company.location || '',
           products: company.products || ''
         }));
       } catch (err) {
@@ -112,7 +111,6 @@ export default function EditSalesReportPage() {
       // 회사 선택이 해제된 경우 필드 초기화
       setFormData(prev => ({
         ...prev,
-        location: '',
         products: ''
       }));
     }
@@ -126,13 +124,13 @@ export default function EditSalesReportPage() {
     }
     setSaving(true)
     setError(null)
-    let companyId = formData.company_obj
+    let companyCode = formData.company_obj
     try {
       // 저장 시점에 회사 id가 없으면 자동 등록
-      if (!companyId && formData.company) {
+      if (!companyCode && formData.company) {
         try {
           const company = await companyApi.autoCreateCompany(formData.company)
-          companyId = company.id
+          companyCode = company.company_code // company_code 문자열
         } catch (err) {
           setError('회사 자동 등록에 실패했습니다.')
           setSaving(false)
@@ -141,7 +139,7 @@ export default function EditSalesReportPage() {
       }
       const submitData = { 
         ...formData, 
-        company_obj: companyId || null,
+        company_obj: companyCode || null,
         visitDate: formData.visitDate // 날짜 형식 확인
       }
       console.log('제출 데이터:', submitData)
@@ -161,10 +159,14 @@ export default function EditSalesReportPage() {
       return;
     }
     setTagLoading(true);
+    setError(null);
     try {
+      console.log('키워드 추출 시작:', formData.content.substring(0, 50));
       const tags = await fetchRecommendedTags(formData.content);
+      console.log('키워드 추출 결과:', tags);
       setFormData((prev) => ({ ...prev, tags: tags.join(', ') }));
     } catch (err) {
+      console.error('키워드 추출 오류:', err);
       setError('추천 태그 추출에 실패했습니다.');
     } finally {
       setTagLoading(false);
@@ -218,92 +220,109 @@ export default function EditSalesReportPage() {
           <CardDescription>필요한 정보를 수정 후 저장하세요.</CardDescription>
         </CardHeader>
         <CardContent>
+          {error && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
+              <p className="text-red-600 text-sm">{error}</p>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <Label>방문일자</Label>
-                <Input
-                  type="date"
-                  value={formData.visitDate}
-                  onChange={e => handleInputChange("visitDate", e.target.value)}
-                  required
-                />
+            {/* 1. 방문일자 */}
+            <div className="space-y-2">
+              <Label>방문일자 *</Label>
+              <Input
+                type="date"
+                value={formData.visitDate}
+                onChange={e => handleInputChange("visitDate", e.target.value)}
+                required
+              />
+            </div>
+
+            {/* 2. 회사명 */}
+            <div className="space-y-2">
+              <Label>회사명 *</Label>
+              <CompanySearchInput
+                value={formData.company}
+                selectedCompanyId={formData.company_obj as unknown as number | undefined}
+                onChange={handleCompanyChange}
+                placeholder="회사명을 입력하거나 선택하세요"
+              />
+            </div>
+
+            {/* 3-0. 영업단계 */}
+            <div className="space-y-2">
+              <Label>영업단계</Label>
+              <Select value={formData.sales_stage || undefined} onValueChange={value => handleInputChange("sales_stage", value)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="영업단계를 선택하세요" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="초기 컨택">초기 컨택</SelectItem>
+                  <SelectItem value="협상 진행(니즈 파악)">협상 진행(니즈 파악)</SelectItem>
+                  <SelectItem value="계약 체결(거래처 등록)">계약 체결(거래처 등록)</SelectItem>
+                  <SelectItem value="납품 관리">납품 관리</SelectItem>
+                  <SelectItem value="관계 유지">관계 유지</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* 4. 영업형태 */}
+            <div className="space-y-2">
+              <Label>영업형태 *</Label>
+              <Select value={formData.type || undefined} onValueChange={value => handleInputChange("type", value)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="영업형태를 선택하세요" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="대면">대면</SelectItem>
+                  <SelectItem value="전화">전화</SelectItem>
+                  <SelectItem value="화상">화상</SelectItem>
+                  <SelectItem value="이메일">이메일</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* 4. 사용품목 */}
+            <div className="space-y-2">
+              <Label htmlFor="products">사용품목</Label>
+              <Textarea
+                id="products"
+                value={formData.products || ''}
+                onChange={e => handleInputChange("products", e.target.value)}
+                placeholder="사용품목을 입력하세요."
+                rows={3}
+                className="resize-none"
+              />
+            </div>
+
+            {/* 5. 미팅 내용 */}
+            <div className="space-y-2">
+              <Label htmlFor="content">미팅 내용 (이슈사항) *</Label>
+              <Textarea
+                id="content"
+                value={formData.content}
+                onChange={e => handleInputChange("content", e.target.value)}
+                placeholder="영업 활동 내용을 상세히 기록해주세요..."
+                rows={6}
+                required
+              />
+            </div>
+
+            {/* 6. 태그 (키워드) */}
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="tags">태그 (키워드)</Label>
+                <Button type="button" variant="secondary" size="sm" onClick={handleRecommendTags} disabled={tagLoading}>
+                  {tagLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  키워드 추출
+                </Button>
               </div>
-              {/* 회사명 입력: CompanySearchInput으로 교체 */}
-              <div className="space-y-2">
-                <Label>회사명</Label>
-                <CompanySearchInput
-                  value={formData.company}
-                  selectedCompanyId={formData.company_obj ?? undefined}
-                  onChange={handleCompanyChange}
-                  placeholder="회사명을 입력하거나 선택하세요"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>영업형태</Label>
-                <Select value={formData.type} onValueChange={value => handleInputChange("type", value)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="영업형태 선택" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="대면">대면</SelectItem>
-                    <SelectItem value="전화">전화</SelectItem>
-                    <SelectItem value="화상">화상</SelectItem>
-                    <SelectItem value="이메일">이메일</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>소재지</Label>
-                <Select value={formData.location || ''} onValueChange={(value) => handleInputChange("location", value)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="소재지를 선택하세요" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="수도권">수도권</SelectItem>
-                    <SelectItem value="충청권">충청권</SelectItem>
-                    <SelectItem value="강원권">강원권</SelectItem>
-                    <SelectItem value="영남권">영남권</SelectItem>
-                    <SelectItem value="호남권">호남권</SelectItem>
-                    <SelectItem value="기타">기타</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="products">사용품목</Label>
-                <Input
-                  id="products"
-                  value={formData.products || ''}
-                  onChange={e => handleInputChange("products", e.target.value)}
-                  placeholder="예: 국내산 닭, 수입산 돼지고기"
-                />
-              </div>
-              <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="content">미팅 내용 (이슈사항)</Label>
-                <Textarea
-                  id="content"
-                  value={formData.content}
-                  onChange={e => handleInputChange("content", e.target.value)}
-                  placeholder="영업 활동 내용을 상세히 기록해주세요..."
-                  rows={6}
-                  required
-                />
-              </div>
-              <div className="space-y-2 md:col-span-2">
-                <div className="flex items-center gap-2">
-                  <Label htmlFor="tags">태그 (키워드)</Label>
-                  <Button type="button" variant="secondary" size="sm" onClick={handleRecommendTags} disabled={tagLoading}>
-                    {tagLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    키워드 추출
-                  </Button>
-                </div>
-                <Input
-                  id="tags"
-                  value={formData.tags}
-                  onChange={e => handleInputChange("tags", e.target.value)}
-                  placeholder="쉼표로 구분하여 입력 (예: 신규고객, 대량주문)"
-                />
-              </div>
+              <Input
+                id="tags"
+                value={formData.tags}
+                onChange={e => handleInputChange("tags", e.target.value)}
+                placeholder="쉼표로 구분하여 입력 (예: 신규고객, 대량주문)"
+              />
             </div>
             <div className="flex justify-end space-x-4">
               <Button type="button" variant="outline" asChild disabled={saving}>

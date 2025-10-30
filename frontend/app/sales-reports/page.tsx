@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Search, Plus, Eye, Edit, Loader2, ChevronLeft, ChevronRight } from "lucide-react"
+import { Search, Plus, Loader2, ChevronLeft, ChevronRight } from "lucide-react"
 import Link from "next/link"
 import { salesReportApi, SalesReport, PaginatedResponse } from "@/lib/api"
 import { PaginationInput } from "@/components/ui/pagination"
@@ -196,11 +196,8 @@ export default function SalesReportsPage() {
                   <TableHead>팀명</TableHead>
                   <TableHead>방문일자</TableHead>
                   <TableHead>회사명</TableHead>
-                  <TableHead>영업형태</TableHead>
-                  <TableHead>소재지</TableHead>
-                  <TableHead>사용품목</TableHead>
+                  <TableHead>영업형태 / 영업단계</TableHead>
                   <TableHead>태그</TableHead>
-                  <TableHead>작업</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -208,18 +205,23 @@ export default function SalesReportsPage() {
                   const tagsArr = report.tags ? report.tags.split(',').filter((tag: string) => tag.trim()) : [];
                   const showTags = tagsArr.slice(0, 3);
                   return (
-                    <TableRow key={report.id}>
+                    <TableRow 
+                      key={report.id}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => router.push(`/sales-reports/${report.id}?page=${currentPage}`)}
+                    >
                       <TableCell className="font-medium">{report.author_name}</TableCell>
-                      <TableCell>{report.team_display}</TableCell>
+                      <TableCell>{report.author_department}</TableCell>
                       <TableCell>{formatDate(report.visitDate)}</TableCell>
-                      <TableCell>{report.company_display}</TableCell>
+                      <TableCell>{report.company_display || (report as any).company_name || report.company}</TableCell>
                       <TableCell>
-                        <Badge variant={getTypeBadge(report.type)}>
-                          {report.type}
-                        </Badge>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={getTypeBadge(report.type)}>
+                            {report.type}
+                          </Badge>
+                          <Badge variant="outline">{(report as any).sales_stage || '미지정'}</Badge>
+                        </div>
                       </TableCell>
-                      <TableCell>{report.location}</TableCell>
-                      <TableCell>{report.products}</TableCell>
                       <TableCell>
                         <div className="flex gap-1 items-center">
                           {showTags.map((tag: string, index: number) => (
@@ -230,20 +232,6 @@ export default function SalesReportsPage() {
                           {tagsArr.length > 3 && (
                             <span className="text-xs text-muted-foreground ml-1">...</span>
                           )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center space-x-2">
-                          <Button variant="ghost" size="sm" asChild>
-                            <Link href={`/sales-reports/${report.id}?page=${currentPage}`}>
-                              <Eye className="h-4 w-4" />
-                            </Link>
-                          </Button>
-                          <Button variant="ghost" size="sm" asChild>
-                            <Link href={`/sales-reports/${report.id}/edit?page=${currentPage}`}>
-                              <Edit className="h-4 w-4" />
-                            </Link>
-                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>

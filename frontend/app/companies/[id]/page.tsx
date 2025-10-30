@@ -35,7 +35,7 @@ export default function CompanyDetailPage() {
       try {
         setLoading(true)
         setError(null)
-        const companyData = await companyApi.getCompany(Number(params.id))
+        const companyData = await companyApi.getCompany(params.id as string)
         setCompany(companyData)
       } catch (err) {
         setError('회사 정보를 불러오는 중 오류가 발생했습니다.')
@@ -79,10 +79,10 @@ export default function CompanyDetailPage() {
   useEffect(() => {
     // SalesData 불러오기
     const fetchSalesData = async () => {
-      if (!company?.id) return;
+      if (!company?.company_code) return;
       try {
         setSalesDataLoading(true);
-        const data = await companySalesDataApi.getCompanySalesData(company.id);
+        const data = await companySalesDataApi.getCompanySalesData(company.company_code);
         setSalesData(data);
         console.log("SalesData loaded:", data);
       } catch (e) {
@@ -92,10 +92,10 @@ export default function CompanyDetailPage() {
         setSalesDataLoading(false);
       }
     };
-    if (company?.id) {
+    if (company?.company_code) {
       fetchSalesData();
     }
-  }, [company?.id]);
+  }, [company?.company_code]);
 
   // 데이터 매핑 헬퍼 함수
   const getCompanyDisplayName = (company: Company) => {
@@ -103,7 +103,7 @@ export default function CompanyDetailPage() {
   }
 
   const getCompanyCode = (company: Company) => {
-    return company.sales_diary_company_code || '-'
+    return company.company_code || '-'
   }
 
   const getCompanySapCode = (company: Company) => {
@@ -123,7 +123,7 @@ export default function CompanyDetailPage() {
   }
 
   const getCompanyAddress = (company: Company) => {
-    return company.address || '-'
+    return company.head_address || '-'
   }
 
   const getCompanyContact = (company: Company) => {
@@ -143,7 +143,7 @@ export default function CompanyDetailPage() {
   }
 
   const getCompanyMainProducts = (company: Company) => {
-    return company.main_product || '-'
+    return company.products || '-'
   }
 
   const getCompanyStartDate = (company: Company) => {
@@ -163,7 +163,7 @@ export default function CompanyDetailPage() {
   }
 
   const getSalesPersonName = (company: Company) => {
-    return company.username_display || '-';
+    return company.employee_name || '-';
   }
 
   // 회사 삭제 함수
@@ -172,7 +172,7 @@ export default function CompanyDetailPage() {
     if (typeof window !== 'undefined' && !window.confirm('정말로 이 회사를 삭제하시겠습니까?')) return;
     try {
       setLoading(true);
-      await companyApi.deleteCompany(company.id);
+      await companyApi.deleteCompany(company.company_code);
       toast({ title: '삭제 완료', description: '회사가 삭제되었습니다.' });
       router.push('/companies');
     } catch (err: any) {
@@ -277,7 +277,7 @@ export default function CompanyDetailPage() {
         </div>
         <div className="flex gap-2">
           <Button asChild>
-            <Link href={`/companies/${company.id}/edit`}>
+            <Link href={`/companies/${company.company_code}/edit`}>
               <Edit className="mr-2 h-4 w-4" />
               수정
             </Link>
@@ -291,106 +291,153 @@ export default function CompanyDetailPage() {
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">
-        {/* 회사 기본 정보 */}
+        {/* 기본정보 */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center space-x-2">
               <Building2 className="h-5 w-5" />
-              <span>기본 정보</span>
+              <span>기본정보</span>
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 text-base text-gray-800">
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <p className="text-sm font-medium text-muted-foreground">회사코드</p>
-                <p className="text-lg">{getCompanyCode(company)}</p>
+                <p className="text-lg">{company.company_code || '-'}</p>
               </div>
               <div>
-                <p className="text-sm font-medium text-muted-foreground">SAP코드</p>
-                <p className="text-lg">{getCompanySapCode(company)}</p>
+                <p className="text-sm font-medium text-muted-foreground">회사명</p>
+                <p className="text-lg">{company.company_name || '-'}</p>
               </div>
               <div>
-                <p className="text-sm font-medium text-muted-foreground">기업형태</p>
-                <p className="text-lg">{getCompanyType(company)}</p>
+                <p className="text-sm font-medium text-muted-foreground">고객분류</p>
+                <p className="text-lg">{company.customer_classification || '-'}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">회사유형</p>
+                <p className="text-lg">{company.company_type || '-'}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">사업자등록번호</p>
+                <p className="text-lg">{company.tax_id || '-'}</p>
               </div>
               <div>
                 <p className="text-sm font-medium text-muted-foreground">설립일</p>
-                <p className="text-lg">{getCompanyEstablishDate(company)}</p>
+                <p className="text-lg">{company.established_date || '-'}</p>
               </div>
               <div>
-                <p className="text-sm font-medium text-muted-foreground">영업 사원</p>
-                <p className="text-lg">{getSalesPersonName(company)}</p>
+                <p className="text-sm font-medium text-muted-foreground">대표자명</p>
+                <p className="text-lg">{company.ceo_name || '-'}</p>
               </div>
-            </div>
-
-            <Separator />
-
-            <div>
-              <p className="text-sm font-medium text-muted-foreground mb-1">대표자명</p>
-              <p className="text-lg">{getCompanyRepresentative(company)}</p>
-            </div>
-
-            <div>
-              <p className="text-sm font-medium text-muted-foreground mb-1">주소</p>
-              <div className="flex items-start space-x-2">
-                <MapPin className="h-4 w-4 mt-1 text-muted-foreground" />
-                <p className="text-lg">{getCompanyAddress(company)}</p>
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">대표전화</p>
+                <p className="text-lg">{company.main_phone || company.contact_phone || '-'}</p>
               </div>
-            </div>
-
-            <div>
-              <p className="text-sm font-medium text-muted-foreground mb-1">대표번호</p>
-              <div className="flex items-center space-x-2">
-                <Phone className="h-4 w-4 text-muted-foreground" />
-                <p className="text-lg">{getCompanyContact(company)}</p>
+              <div className="col-span-2">
+                <p className="text-sm font-medium text-muted-foreground mb-1">본사 주소</p>
+                <div className="flex items-start space-x-2">
+                  <MapPin className="h-4 w-4 mt-1 text-muted-foreground" />
+                  <p className="text-lg">{company.head_address || '-'}</p>
+                </div>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">시/구</p>
+                <p className="text-lg">{company.city_district || '-'}</p>
+              </div>
+              <div className="col-span-2">
+                <p className="text-sm font-medium text-muted-foreground mb-1">공장 주소</p>
+                <p className="text-lg">{company.processing_address || '-'}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">업종명</p>
+                <p className="text-lg">{company.industry_name || '-'}</p>
+              </div>
+              <div className="col-span-2">
+                <p className="text-sm font-medium text-muted-foreground">주요제품</p>
+                <p className="text-lg">{company.products || '-'}</p>
+              </div>
+              <div className="col-span-2">
+                <p className="text-sm font-medium text-muted-foreground">웹사이트</p>
+                <p className="text-lg break-all">{company.website || '-'}</p>
+              </div>
+              <div className="col-span-2">
+                <p className="text-sm font-medium text-muted-foreground">참고사항</p>
+                <p className="text-lg whitespace-pre-wrap">{company.remarks || '-'}</p>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* 거래 정보 */}
+        {/* SAP정보 */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center space-x-2">
               <DollarSign className="h-5 w-5" />
-              <span>거래 정보</span>
+              <span>SAP정보</span>
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 text-base text-gray-800">
-            <div>
-              <p className="text-sm font-medium text-muted-foreground mb-1">담당자</p>
-              <p className="text-lg">{getCompanyManager(company)}</p>
-            </div>
-
-            <div>
-              <p className="text-sm font-medium text-muted-foreground mb-1">담당자 연락처</p>
-              <div className="flex items-center space-x-2">
-                <Phone className="h-4 w-4 text-muted-foreground" />
-                <p className="text-lg">{getCompanyManagerPhone(company)}</p>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">SAP코드여부</p>
+                <p className="text-lg">{company.sap_code_type || '-'}</p>
               </div>
-            </div>
-
-            <div>
-              <p className="text-sm font-medium text-muted-foreground mb-1">유통형태</p>
-              <p className="text-lg">{getCompanyDistributionType(company)}</p>
-            </div>
-
-            <div>
-              <p className="text-sm font-medium text-muted-foreground mb-1">주생산품</p>
-              <p className="text-lg">{getCompanyMainProducts(company)}</p>
-            </div>
-
-            <div>
-              <p className="text-sm font-medium text-muted-foreground mb-1">거래개시일</p>
-              <div className="flex items-center space-x-2">
-                <Calendar className="h-4 w-4 text-muted-foreground" />
-                <p className="text-lg">{getCompanyStartDate(company)}</p>
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">SAP거래처코드</p>
+                <p className="text-lg">{company.company_code_sap || '-'}</p>
               </div>
-            </div>
-
-            <div>
-              <p className="text-sm font-medium text-muted-foreground mb-1">지급조건</p>
-              <p className="text-lg">{getCompanyPaymentTerms(company)}</p>
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">사업</p>
+                <p className="text-lg">{company.biz_code || '-'}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">사업부</p>
+                <p className="text-lg">{company.biz_name || '-'}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">지점/팀</p>
+                <p className="text-lg">{company.department_code || '-'}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">팀명</p>
+                <p className="text-lg">{company.department || '-'}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">사원번호</p>
+                <p className="text-lg">{company.employee_number || '-'}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">영업 사원</p>
+                <p className="text-lg">{company.employee_name || '-'}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">유통형태코드</p>
+                <p className="text-lg">{company.distribution_type_sap_code || '-'}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">유통형태</p>
+                <p className="text-lg">{company.distribution_type_sap || '-'}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">거래처 담당자</p>
+                <p className="text-lg">{company.contact_person || '-'}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">담당자 연락처</p>
+                <p className="text-lg">{company.contact_phone || '-'}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">코드생성일</p>
+                <p className="text-lg">{company.code_create_date || '-'}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">거래시작일</p>
+                <p className="text-lg">{company.transaction_start_date || '-'}</p>
+              </div>
+              <div className="col-span-2">
+                <p className="text-sm font-medium text-muted-foreground">결제조건</p>
+                <p className="text-lg">{company.payment_terms || '-'}</p>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -622,7 +669,7 @@ export default function CompanyDetailPage() {
       )}
 
       {/* 영업일지 리스트 */}
-      {isClient && <CompanySalesReportList companyId={company.sales_diary_company_code || ""} />}
+      {isClient && <CompanySalesReportList companyId={company.company_code || ""} />}
     </div>
   )
 }

@@ -5,12 +5,14 @@ const getApiBaseUrl = () => {
     const hostname = window.location.hostname;
     const port = window.location.port;
     
-    // 개발 환경 체크 (더 포괄적으로)
-    if (hostname === 'localhost' || 
-        hostname === '127.0.0.1' || 
-        hostname.startsWith('172.28.') ||  // Docker/VM 환경
-        port.startsWith('300')) {  // 3000, 3001, 3002 등 모든 300x 포트
+    // localhost나 127.0.0.1인 경우
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
       return 'http://127.0.0.1:8000/api';
+    }
+    
+    // 172.28.x.x 같은 내부 IP인 경우 같은 호스트의 8000 포트 사용
+    if (hostname.startsWith('172.28.') || hostname.startsWith('192.168.')) {
+      return `http://${hostname}:8000/api`;
     }
     
     // 그 외의 경우 운영 환경으로 간주
@@ -32,42 +34,49 @@ export interface SalesReport {
   team_display: string;  // 표시용 팀명
   visitDate: string;
   company: string;
-  company_obj?: number | null;  // Company ID (선택사항)
+  company_code?: string | null;  // 회사 코드(Primary Key)
   company_display: string;  // 표시용 회사명
   type: string;
-  location: string;
   products: string;
   content: string;
   tags: string;
   createdAt: string;
 }
 
-// 새로운 Company 타입 (CSV 데이터 구조에 맞춤)
+// 새로운 Company 타입 (TSV 데이터 구조에 맞춤)
 export interface Company {
-  id: number;
+  company_code: string; // Primary Key
   company_name: string;
-  sales_diary_company_code?: string;
-  company_code_sm?: string;
-  company_code_sap?: string;
-  company_type?: string;
+  // 기본정보
+  customer_classification?: '기존' | '신규' | '이탈' | '기타';
+  company_type?: '개인' | '법인';
+  tax_id?: string;
   established_date?: string;
   ceo_name?: string;
-  address?: string;
-  contact_person?: string;
-  contact_phone?: string;
+  head_address?: string;
+  city_district?: string;
+  processing_address?: string;
   main_phone?: string;
-  distribution_type_sap?: string;
   industry_name?: string;
-  main_product?: string;
-  transaction_start_date?: string;
-  payment_terms?: string;
-  customer_classification?: string;
+  products?: string;
   website?: string;
   remarks?: string;
-  username?: number | null; // 영업 사원 (User FK)
-  username_display?: string | null; // 영업 사원 이름
-  location?: string; // 소재지
-  products?: string; // 사용품목
+  // SAP정보
+  sap_code_type?: string;
+  company_code_sap?: string;
+  biz_code?: string;
+  biz_name?: string;
+  department_code?: string;
+  department?: string;
+  employee_number?: string;
+  employee_name?: string;
+  distribution_type_sap_code?: string;
+  distribution_type_sap?: string;
+  contact_person?: string;
+  contact_phone?: string;
+  code_create_date?: string;
+  transaction_start_date?: string;
+  payment_terms?: string;
 }
 
 export interface CompanyFilters {
@@ -203,9 +212,9 @@ export const salesReportApi = {
   createReport: (data: {
     visitDate: string;
     company: string;
-    company_obj?: number | null;
+    company_obj?: string | null;
     type: string;
-    location: string;
+    location?: string;  // 신규 회사 소재지 (optional)
     products: string;
     content: string;
     tags: string;
@@ -255,17 +264,22 @@ export const companyApi = {
     return apiCall<PaginatedResponse<Company>>(`/companies/${queryString}`);
   },
 
-  // 회사명 자동완성 검색
-  suggestCompanies: (query: string): Promise<Array<{id: number, name: string}>> => {
+  // 회사명 자동완성 검색 (회사명 (시/구) 형식)
+  suggestCompanies: (query: string): Promise<Array<{id: string, name: string}>> => {
     if (!query.trim()) {
       return Promise.resolve([]);
     }
-    return apiCall<Array<{id: number, name: string}>>(`/company/suggest/?query=${encodeURIComponent(query)}`);
+    return apiCall<Array<{id: string, name: string}>>(`/company/suggest/?query=${encodeURIComponent(query)}`);
+  },
+
+  // 회사의 유니크한 상품명 조회
+  getUniqueProducts: (companyCode: string): Promise<{products: string[]}> => {
+    return apiCall<{products: string[]}>(`/companies/${companyCode}/unique-products/`);
   },
 
   // 회사 상세 조회
-  getCompany: (id: number): Promise<Company> => {
-    return apiCall<Company>(`/companies/${id}/`);
+  getCompany: (companyCode: string): Promise<Company> => {
+    return apiCall<Company>(`/companies/${companyCode}/`);
   },
 
   // 회사 생성
@@ -277,16 +291,16 @@ export const companyApi = {
   },
 
   // 회사 수정
-  updateCompany: (id: number, data: Partial<Company>): Promise<Company> => {
-    return apiCall<Company>(`/companies/${id}/`, {
+  updateCompany: (companyCode: string, data: Partial<Company>): Promise<Company> => {
+    return apiCall<Company>(`/companies/${companyCode}/`, {
       method: 'PUT',
       body: JSON.stringify(data),
     });
   },
 
   // 회사 삭제
-  deleteCompany: (id: number): Promise<void> => {
-    return apiCall<void>(`/companies/${id}/`, {
+  deleteCompany: (companyCode: string): Promise<void> => {
+    return apiCall<void>(`/companies/${companyCode}/`, {
       method: 'DELETE',
     });
   },
@@ -456,7 +470,7 @@ export const companyFinancialStatusApi = {
 
 // 회사별 SalesData API
 export const companySalesDataApi = {
-  getCompanySalesData: async (companyId: number): Promise<{
+  getCompanySalesData: async (companyCode: string): Promise<{
     company_name: string;
     company_code_sap: string;
     sales_chart_data: Array<{
@@ -471,20 +485,31 @@ export const companySalesDataApi = {
     }>;
     total_records: number;
   }> => {
-    return apiCall(`/companies/${companyId}/sales-data/`);
+    return apiCall(`/companies/${companyCode}/sales-data/`);
   },
 };
 
 // 키워드 추출(추천 태그) API
 export async function fetchRecommendedTags(content: string): Promise<string[]> {
-  const res = await apiCall<{ keywords: string[] }>(
-    '/extract-keywords/',
-    {
-      method: 'POST',
-      body: JSON.stringify({ text: content }),
+  console.log('fetchRecommendedTags 호출됨, content 길이:', content.length);
+  try {
+    const res = await apiCall<{ keywords: string[] }>(
+      '/extract-keywords/',
+      {
+        method: 'POST',
+        body: JSON.stringify({ text: content }),
+      }
+    );
+    console.log('키워드 추출 API 응답:', res);
+    if (!res || !res.keywords) {
+      console.error('잘못된 응답 형식:', res);
+      throw new Error('키워드를 추출할 수 없습니다.');
     }
-  );
-  return res.keywords;
+    return res.keywords;
+  } catch (error) {
+    console.error('키워드 추출 API 호출 중 오류:', error);
+    throw error;
+  }
 }
 
 // 대시보드 통계 API

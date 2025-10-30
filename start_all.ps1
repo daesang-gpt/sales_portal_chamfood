@@ -6,6 +6,20 @@
 function Start-All {
     Write-Host "Starting Backend and Frontend..." -ForegroundColor Cyan
 
+    # Clean up old completed jobs first
+    Write-Host "Cleaning up old jobs..." -ForegroundColor Yellow
+    Get-Job | Where-Object { $_.State -eq "Completed" -or $_.State -eq "Failed" } | Remove-Job -Force -ErrorAction SilentlyContinue
+    
+    # Check if jobs are already running
+    $existingBackend = Get-Job -Name backend -ErrorAction SilentlyContinue | Where-Object { $_.State -eq "Running" }
+    $existingFrontend = Get-Job -Name frontend -ErrorAction SilentlyContinue | Where-Object { $_.State -eq "Running" }
+    
+    if ($existingBackend -or $existingFrontend) {
+        Write-Host "Warning: Backend or Frontend jobs are already running!" -ForegroundColor Yellow
+        Write-Host "Please stop existing jobs first using: Get-Job | Stop-Job" -ForegroundColor Yellow
+        return
+    }
+
     # Get the script directory
     $ScriptDir = if ($MyInvocation.MyCommand.Path) { 
         Split-Path -Parent $MyInvocation.MyCommand.Path 
@@ -84,6 +98,19 @@ function Start-All {
     Write-Host "Frontend job started with ID: $($frontendJob.Id)" -ForegroundColor Green
 
     Write-Host "Started as background jobs. Use 'Get-Job' and 'Receive-Job -Keep' to view logs." -ForegroundColor Green
+}
+
+function Stop-All {
+    Write-Host "Stopping Backend and Frontend jobs..." -ForegroundColor Cyan
+    
+    # Stop running jobs
+    Get-Job -Name backend -ErrorAction SilentlyContinue | Where-Object { $_.State -eq "Running" } | Stop-Job
+    Get-Job -Name frontend -ErrorAction SilentlyContinue | Where-Object { $_.State -eq "Running" } | Stop-Job
+    
+    # Remove all jobs
+    Get-Job | Remove-Job -Force -ErrorAction SilentlyContinue
+    
+    Write-Host "All jobs stopped and removed." -ForegroundColor Green
 }
 
 function Start-AllWindows {
