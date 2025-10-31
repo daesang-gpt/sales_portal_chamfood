@@ -24,9 +24,11 @@ class User(AbstractUser):
     department = models.CharField(max_length=100)
     employee_number = models.CharField(max_length=20, unique=True)
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='user')
+    email = models.EmailField('이메일', blank=True, null=True, help_text='비밀번호 찾기 시 사용됩니다.')
+    is_password_changed = models.BooleanField('비밀번호 변경 여부', default=False, help_text='최초 로그인 후 비밀번호 변경 여부')
 
     USERNAME_FIELD = 'username'
-    REQUIRED_FIELDS = ['name', 'department', 'employee_number', 'role']
+    REQUIRED_FIELDS = ['name', 'department', 'employee_number', 'role', 'email']
 
     def __str__(self):
         return f"{self.name} ({self.username})"
@@ -170,7 +172,7 @@ class Report(models.Model):
         verbose_name_plural = '영업일지들'
 
 class CompanyFinancialStatus(models.Model):
-    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='financial_statuses', verbose_name='회사')
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='financial_statuses', verbose_name='회사', db_column='company_id')
     fiscal_year = models.DateField(verbose_name='결산년도')
     total_assets = models.BigIntegerField(verbose_name='총자산')
     capital = models.BigIntegerField(verbose_name='자본금')
@@ -186,7 +188,13 @@ class CompanyFinancialStatus(models.Model):
         ordering = ['-fiscal_year', 'company']
 
     def __str__(self):
-        return self.company_name or 'Unknown Income'
+        try:
+            if self.company:
+                company_name = self.company.company_name or self.company.company_code
+                return f"{company_name} - {self.fiscal_year}"
+            return f"Unknown - {self.fiscal_year}"
+        except Exception:
+            return f"Financial Status - {self.fiscal_year}"
 
 class SalesData(models.Model):
     """실제 매출 데이터 모델"""

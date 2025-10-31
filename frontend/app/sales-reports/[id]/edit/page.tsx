@@ -69,7 +69,7 @@ export default function EditSalesReportPage() {
       setError(null)
       const report = await salesReportApi.getReport(Number(params.id))
       setFormData({
-        company: report.company_display || report.company, // 표시명 우선
+        company: report.company_display || report.company_name || '', // 표시명 우선
         company_obj: report.company_code || undefined,
         sales_stage: (report as any).sales_stage || "",
         type: report.type,
@@ -89,17 +89,17 @@ export default function EditSalesReportPage() {
     setFormData((prev) => ({ ...prev, [field]: value }))
   }
 
-  const handleCompanyChange = async (companyName: string, companyId?: number) => {
+  const handleCompanyChange = async (companyName: string, companyId?: string) => {
     setFormData(prev => ({ 
       ...prev, 
       company: companyName, 
-      company_obj: (companyId as unknown as string | undefined)
+      company_obj: companyId
     }))
     
     // 회사가 선택된 경우 해당 회사의 데이터 불러오기
     if (companyId) {
       try {
-        const company = await companyApi.getCompany(String(companyId));
+        const company = await companyApi.getCompany(companyId);
         setFormData(prev => ({
           ...prev,
           products: company.products || ''
@@ -243,7 +243,7 @@ export default function EditSalesReportPage() {
               <Label>회사명 *</Label>
               <CompanySearchInput
                 value={formData.company}
-                selectedCompanyId={formData.company_obj as unknown as number | undefined}
+                selectedCompanyId={formData.company_obj}
                 onChange={handleCompanyChange}
                 placeholder="회사명을 입력하거나 선택하세요"
               />

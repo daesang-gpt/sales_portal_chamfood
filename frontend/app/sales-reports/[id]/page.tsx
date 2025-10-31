@@ -30,8 +30,13 @@ export default function SalesReportDetailPage() {
       try {
         setLoading(true)
         const reportData = await salesReportApi.getReport(Number(params.id))
+        console.log('[영업일지 상세] 영업일지 데이터:', reportData);
+        console.log('[영업일지 상세] company_code:', reportData.company_code);
+        console.log('[영업일지 상세] company_code_resolved:', (reportData as any).company_code_resolved);
+        console.log('[영업일지 상세] company_obj:', (reportData as any).company_obj);
         setReport(reportData)
       } catch (err) {
+        console.error('[영업일지 상세] 오류:', err);
         setError(err instanceof Error ? err.message : '영업일지를 불러오는데 실패했습니다.')
       } finally {
         setLoading(false)
@@ -46,23 +51,36 @@ export default function SalesReportDetailPage() {
   // 같은 회사의 다른 영업일지 불러오기
   useEffect(() => {
     const fetchOtherReports = async () => {
-      if (!report || !report.company_code) return;
+      if (!report) return;
+      
+      // company_code 확인 (다양한 필드에서 시도)
+      const companyCode = report.company_code || (report as any).company_code_resolved || null;
+      if (!companyCode) {
+        console.warn('영업일지에 company_code가 없습니다:', report);
+        setOtherError("회사 정보를 찾을 수 없어 영업일지 리스트를 불러올 수 없습니다.")
+        setOtherLoading(false)
+        return;
+      }
+      
       setOtherLoading(true)
       setOtherError(null)
       try {
+        console.log('영업일지 리스트 조회:', { companyId: companyCode });
         const data = await salesReportApi.getReports({
-          companyId: report.company_code,
+          companyId: companyCode,
           ordering: "-visitDate",
           page_size: 100, // 충분히 크게 받아서 10개만 보여줌
         })
-        setOtherReports((data as any).results)
+        console.log('영업일지 리스트 응답:', data);
+        setOtherReports((data as any).results || [])
       } catch (err) {
+        console.error('영업일지 리스트 조회 오류:', err);
         setOtherError("같은 회사의 영업일지를 불러오는 중 오류가 발생했습니다.")
       } finally {
         setOtherLoading(false)
       }
     }
-    if (report && (report as any).company_code) {
+    if (report) {
       fetchOtherReports()
     }
   }, [report])
@@ -162,11 +180,11 @@ export default function SalesReportDetailPage() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <CardTitle className="text-2xl">{report.company_display || (report as any).company_name || report.company}</CardTitle>
-              <Button variant="ghost" size="sm" asChild disabled={!(report.company_code || (report.company_display || report.company))}>
+              <CardTitle className="text-2xl">{report.company_display || report.company_name || '-'}</CardTitle>
+              <Button variant="ghost" size="sm" asChild disabled={!(report.company_code || (report.company_display || report.company_name))}>
                 <Link href={report.company_code 
                   ? `/companies/${report.company_code}` 
-                  : `/companies?search=${encodeURIComponent((report.company_display || report.company || ''))}`
+                  : `/companies?search=${encodeURIComponent((report.company_display || report.company_name || ''))}`
                 }>
                   회사 정보 바로가기
                   <ArrowRight className="ml-1 h-4 w-4" />
@@ -259,7 +277,7 @@ export default function SalesReportDetailPage() {
                 </TableBody>
               </Table>
               {otherReports.length > 10 && !showAll && (
-                <div className="flex justify-end mt-2">
+                <div className="flex justify-center mt-4 pb-2">
                   <Button size="sm" variant="ghost" onClick={() => setShowAll(true)}>더 보기</Button>
                 </div>
               )}

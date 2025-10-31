@@ -50,11 +50,11 @@ export default function NewSalesReportPage() {
   const [productSuggestions, setProductSuggestions] = useState<string[]>([])
 
   // 회사 선택 시 처리
-  const handleCompanyChange = async (companyName: string, companyId?: number) => {
+  const handleCompanyChange = async (companyName: string, companyId?: string) => {
     setFormData(prev => ({ 
       ...prev, 
       company: companyName, 
-      company_obj: (companyId as unknown as string | undefined)
+      company_obj: companyId
     }))
     
     // 회사가 선택된 경우
@@ -62,7 +62,7 @@ export default function NewSalesReportPage() {
       setIsNewCompany(false)
       // 해당 회사의 유니크한 상품명 불러오기
       try {
-        const response = await companyApi.getUniqueProducts(String(companyId));
+        const response = await companyApi.getUniqueProducts(companyId);
         // 중복 제거, 빈 값 제거, 가나다순 정렬
         const uniqueProducts = [...new Set(response.products || [])]
           .filter(p => p && p.trim())
@@ -218,7 +218,7 @@ export default function NewSalesReportPage() {
               <Label>회사명 *</Label>
               <CompanySearchInput
                 value={formData.company}
-                selectedCompanyId={formData.company_obj as unknown as number | undefined}
+                selectedCompanyId={formData.company_obj}
                 onChange={handleCompanyChange}
                 placeholder="회사명을 입력하거나 선택하세요"
               />

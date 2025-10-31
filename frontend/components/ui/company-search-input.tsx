@@ -8,14 +8,14 @@ import { companyApi } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 interface CompanySuggestion {
-  id: number
+  id: string  // company_code (문자열)
   name: string
 }
 
 interface CompanySearchInputProps {
   value: string
-  selectedCompanyId?: number
-  onChange: (value: string, companyId?: number) => void
+  selectedCompanyId?: string  // company_code (문자열)
+  onChange: (value: string, companyId?: string) => void
   placeholder?: string
   className?: string
   disabled?: boolean

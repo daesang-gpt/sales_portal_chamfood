@@ -55,13 +55,13 @@ export default function CompanyDetailPage() {
   }, [params.id])
 
   useEffect(() => {
-    // 회사매출현황 불러오기
-    console.log("useEffect - company?.company_code_sap", company?.company_code_sap); // 추가
+    // 회사매출현황 불러오기 (company_code 사용)
+    console.log("useEffect - company?.company_code", company?.company_code); // 추가
 
     const fetchFinancialStatus = async () => {
-      if (!company?.company_code_sap) return;
+      if (!company?.company_code) return;
       try {
-        const data = await companyFinancialStatusApi.getByCompanyCode(company.company_code_sap);
+        const data = await companyFinancialStatusApi.getByCompanyCode(company.company_code);
         const list = Array.isArray(data) ? data : (data as any).results;
         setFinancialStatus(list.sort((a: any, b: any) => b.fiscal_year.localeCompare(a.fiscal_year)));
         console.log("setFinancialStatus", data); // 추가
@@ -71,10 +71,10 @@ export default function CompanyDetailPage() {
         console.log("setFinancialStatus error", e); // 추가
       }
     };
-    if (company?.company_code_sap) {
+    if (company?.company_code) {
       fetchFinancialStatus();
     }
-  }, [company?.company_code_sap]);
+  }, [company?.company_code]);
 
   useEffect(() => {
     // SalesData 불러오기
@@ -619,6 +619,8 @@ export default function CompanyDetailPage() {
                   <Tooltip 
                     formatter={(value: number, name: string) => [`${(value / 1000).toFixed(1)}톤`, name]}
                     labelFormatter={(label) => `${label}월`}
+                    wrapperStyle={{ zIndex: 1000 }}
+                    contentStyle={{ zIndex: 1000 }}
                   />
                   <Legend />
                   {/* 동적으로 축종별 Line 생성 */}
@@ -683,16 +685,21 @@ function CompanySalesReportList({ companyId }: { companyId: string }) {
 
   useEffect(() => {
     const fetchReports = async () => {
+      if (!companyId) return;
+      
       setLoading(true);
       setError(null);
       try {
+        console.log('회사 영업일지 리스트 조회:', { companyId });
         const data = await salesReportApi.getReports({
           companyId,
           ordering: "-visitDate",
           page_size: 100,
         });
-        setReports((data as any).results);
+        console.log('회사 영업일지 리스트 응답:', data);
+        setReports((data as any).results || []);
       } catch (err) {
+        console.error('회사 영업일지 리스트 조회 오류:', err);
         setError("영업일지 리스트를 불러오는 중 오류가 발생했습니다.");
       } finally {
         setLoading(false);
@@ -736,7 +743,7 @@ function CompanySalesReportList({ companyId }: { companyId: string }) {
               </TableBody>
             </Table>
             {reports.length > 10 && !showAll && (
-              <div className="flex justify-end mt-2">
+              <div className="flex justify-center mt-4 pb-2">
                 <Button size="sm" variant="ghost" onClick={() => setShowAll(true)}>더 보기</Button>
               </div>
             )}

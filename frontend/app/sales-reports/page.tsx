@@ -213,7 +213,7 @@ export default function SalesReportsPage() {
                       <TableCell className="font-medium">{report.author_name}</TableCell>
                       <TableCell>{report.author_department}</TableCell>
                       <TableCell>{formatDate(report.visitDate)}</TableCell>
-                      <TableCell>{report.company_display || (report as any).company_name || report.company}</TableCell>
+                      <TableCell>{report.company_display || report.company_name || '-'}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Badge variant={getTypeBadge(report.type)}>

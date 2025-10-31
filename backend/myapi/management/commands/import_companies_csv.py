@@ -66,29 +66,43 @@ class Command(BaseCommand):
                             except User.DoesNotExist:
                                 pass
                         
+                        # company_code 생성 (없으면 자동 생성)
+                        company_code = row.get('company_code', '').strip()
+                        if not company_code:
+                            # 자동 생성 로직
+                            from django.db.models import Max
+                            last_code = Company.objects.filter(company_code__startswith='C').aggregate(
+                                max_code=Max('company_code')
+                            )['max_code']
+                            if last_code and last_code[1:].isdigit():
+                                next_num = int(last_code[1:]) + 1
+                            else:
+                                next_num = 1
+                            company_code = f'C{next_num:07d}'
+                        
                         # Company 객체 생성 또는 업데이트
                         company, created = Company.objects.update_or_create(
-                            sales_diary_company_code=row['sales_diary_company_code'] or None,
+                            company_code=company_code,
                             defaults={
                                 'company_name': row['company_name'],
-                                'company_code_sm': row['company_code_sm'] or None,
-                                'company_code_sap': row['company_code_sap'] or None,
-                                'company_type': row['company_type'] or None,
+                                'company_code_sap': row.get('company_code_sap', '').strip() or None,
+                                'company_type': row.get('company_type', '').strip() or None,
                                 'established_date': established_date,
-                                'ceo_name': row['ceo_name'] or None,
-                                'address': row['address'] or None,
-                                'contact_person': row['contact_person'] or None,
-                                'contact_phone': row['contact_phone'] or None,
-                                'main_phone': row['main_phone'] or None,
-                                'distribution_type_sap': row['distribution_type_sap'] or None,
-                                'industry_name': row['industry_name'] or None,
-                                'main_product': row['main_product'] or None,
+                                'ceo_name': row.get('ceo_name', '').strip() or None,
+                                'head_address': row.get('head_address', '').strip() or row.get('address', '').strip() or None,
+                                'processing_address': row.get('processing_address', '').strip() or None,
+                                'contact_person': row.get('contact_person', '').strip() or None,
+                                'contact_phone': row.get('contact_phone', '').strip() or None,
+                                'main_phone': row.get('main_phone', '').strip() or None,
+                                'distribution_type_sap': row.get('distribution_type_sap', '').strip() or None,
+                                'industry_name': row.get('industry_name', '').strip() or None,
+                                'products': row.get('products', '').strip() or row.get('main_product', '').strip() or None,
                                 'transaction_start_date': transaction_start_date,
-                                'payment_terms': row['payment_terms'] or None,
-                                'customer_classification': row['customer_classification'] or None,
-                                'website': row['website'] or None,
-                                'remarks': row['remarks'] or None,
-                                'username': user,
+                                'payment_terms': row.get('payment_terms', '').strip() or None,
+                                'customer_classification': row.get('customer_classification', '').strip() or None,
+                                'website': row.get('website', '').strip() or None,
+                                'remarks': row.get('remarks', '').strip() or None,
+                                'employee_name': user.name if user and hasattr(user, 'name') else None,
                             }
                         )
                         

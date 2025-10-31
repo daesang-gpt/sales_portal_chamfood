@@ -67,22 +67,36 @@ class Command(BaseCommand):
                         if not company_name:
                             continue
 
-                        company, created = Company.objects.get_or_create(
-                            company_name=company_name,
+                        # company_code 생성 (없으면 자동 생성)
+                        company_code = row.get('company_code', '').strip()
+                        if not company_code:
+                            # 자동 생성 로직
+                            from django.db.models import Max
+                            last_code = Company.objects.filter(company_code__startswith='C').aggregate(
+                                max_code=Max('company_code')
+                            )['max_code']
+                            if last_code and last_code[1:].isdigit():
+                                next_num = int(last_code[1:]) + 1
+                            else:
+                                next_num = 1
+                            company_code = f'C{next_num:07d}'
+                        
+                        company, created = Company.objects.update_or_create(
+                            company_code=company_code,
                             defaults={
-                                'sales_diary_company_code': row.get('sales_diary_company_code', '').strip() or None,
-                                'company_code_sm': row.get('company_code_sm', '').strip() or None,
+                                'company_name': company_name,
                                 'company_code_sap': row.get('company_code_sap', '').strip() or None,
                                 'company_type': row.get('company_type', '').strip() or None,
                                 'established_date': established_date,
                                 'ceo_name': row.get('ceo_name', '').strip() or None,
-                                'address': row.get('address', '').strip() or None,
+                                'head_address': row.get('head_address', '').strip() or row.get('address', '').strip() or None,
+                                'processing_address': row.get('processing_address', '').strip() or None,
                                 'contact_person': row.get('contact_person', '').strip() or None,
                                 'contact_phone': row.get('contact_phone', '').strip() or None,
                                 'main_phone': row.get('main_phone', '').strip() or None,
                                 'distribution_type_sap': row.get('distribution_type_sap', '').strip() or None,
                                 'industry_name': row.get('industry_name', '').strip() or None,
-                                'main_product': row.get('main_product', '').strip() or None,
+                                'products': row.get('products', '').strip() or row.get('main_product', '').strip() or None,
                                 'transaction_start_date': transaction_start_date,
                                 'payment_terms': row.get('payment_terms', '').strip() or None,
                                 'customer_classification': row.get('customer_classification', '').strip() or None,
@@ -97,26 +111,6 @@ class Command(BaseCommand):
                                 f'생성됨: {company_name}'
                             )
                         else:
-                            # 기존 데이터 업데이트
-                            company.sales_diary_company_code = row.get('sales_diary_company_code', '').strip() or company.sales_diary_company_code
-                            company.company_code_sm = row.get('company_code_sm', '').strip() or company.company_code_sm
-                            company.company_code_sap = row.get('company_code_sap', '').strip() or company.company_code_sap
-                            company.company_type = row.get('company_type', '').strip() or company.company_type
-                            company.established_date = established_date or company.established_date
-                            company.ceo_name = row.get('ceo_name', '').strip() or company.ceo_name
-                            company.address = row.get('address', '').strip() or company.address
-                            company.contact_person = row.get('contact_person', '').strip() or company.contact_person
-                            company.contact_phone = row.get('contact_phone', '').strip() or company.contact_phone
-                            company.main_phone = row.get('main_phone', '').strip() or company.main_phone
-                            company.distribution_type_sap = row.get('distribution_type_sap', '').strip() or company.distribution_type_sap
-                            company.industry_name = row.get('industry_name', '').strip() or company.industry_name
-                            company.main_product = row.get('main_product', '').strip() or company.main_product
-                            company.transaction_start_date = transaction_start_date or company.transaction_start_date
-                            company.payment_terms = row.get('payment_terms', '').strip() or company.payment_terms
-                            company.customer_classification = row.get('customer_classification', '').strip() or company.customer_classification
-                            company.website = row.get('website', '').strip() or company.website
-                            company.remarks = row.get('remarks', '').strip() or company.remarks
-                            company.save()
                             companies_updated += 1
                             self.stdout.write(
                                 f'업데이트됨: {company_name}'
@@ -140,7 +134,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         company_code = 'C0000020'
-        company = Company.objects.filter(sales_diary_company_code=company_code).first()
+        company = Company.objects.filter(company_code=company_code).first()
         if not company:
             self.stdout.write(self.style.ERROR(f'회사 코드 {company_code}에 해당하는 회사가 없습니다.'))
             return

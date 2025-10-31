@@ -85,6 +85,18 @@ AUTH_USER_MODEL = 'myapi.User'
 
 CORS_ALLOW_ALL_ORIGINS = True
 
+# Email Settings
+# 기본값: 개발 환경에서는 콘솔에 출력 (실제 전송이 필요하면 SMTP 설정 필요)
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+DEFAULT_FROM_EMAIL = 'noreply@sales-portal.com'
+# 운영 환경에서 사용하려면 아래 설정을 사용하세요:
+# EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+# EMAIL_HOST = 'smtp.gmail.com'  # Gmail의 경우
+# EMAIL_PORT = 587
+# EMAIL_USE_TLS = True
+# EMAIL_HOST_USER = 'your-email@gmail.com'
+# EMAIL_HOST_PASSWORD = 'your-app-password'
+
 # JWT Settings
 from datetime import timedelta
 SIMPLE_JWT = {

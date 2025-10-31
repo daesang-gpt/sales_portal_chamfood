@@ -7,8 +7,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import Link from 'next/link';
-import { jwtDecode } from 'jwt-decode';
 
 // 환경에 따른 API URL 설정
 const getApiBaseUrl = () => {
@@ -43,12 +41,14 @@ interface LoginResponse {
   message: string;
   access_token?: string;
   refresh_token?: string;
+  requires_password_change?: boolean;
   user?: {
     id: number;
     name: string;
     department: string;
     employee_number: string;
     role: string;
+    is_password_changed?: boolean;
   };
 }
 
@@ -110,6 +110,12 @@ export default function LoginPage() {
         localStorage.setItem('access_token', data.access_token);
         localStorage.setItem('refresh_token', data.refresh_token || '');
         localStorage.setItem('user', JSON.stringify(data.user));
+        
+        // 최초 로그인인 경우 비밀번호 변경 페이지로 이동
+        if (data.requires_password_change) {
+          router.push('/change-password');
+          return;
+        }
       } else {
         console.log('Login failed:', data.message);
         setError(data.message || '로그인에 실패했습니다.');
@@ -167,13 +173,6 @@ export default function LoginPage() {
             <Button type="submit" className="w-full" disabled={isLoading}>
               {isLoading ? '로그인 중...' : '로그인'}
             </Button>
-
-            <div className="text-center text-sm">
-              계정이 없으신가요?{' '}
-              <Link href="/register" className="text-blue-600 hover:underline">
-                회원가입
-              </Link>
-            </div>
           </form>
         </CardContent>
       </Card>

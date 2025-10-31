@@ -30,12 +30,12 @@ export interface SalesReport {
   author: number;  // User ID
   author_name: string;
   author_department: string;
-  team: string;
-  team_display: string;  // 표시용 팀명
   visitDate: string;
-  company: string;
+  company_name?: string | null;  // 회사명
   company_code?: string | null;  // 회사 코드(Primary Key)
-  company_display: string;  // 표시용 회사명
+  company_obj?: string | null;  // 회사 객체 ID (company_code)
+  company_display?: string;  // 표시용 회사명 (옵션)
+  sales_stage?: string;  // 영업단계
   type: string;
   products: string;
   content: string;
@@ -460,9 +460,9 @@ export const companyApi = {
 
 export const companyFinancialStatusApi = {
   getByCompanyCode: async (companyCode: string): Promise<CompanyFinancialStatus[]> => {
-    // SAP 회사코드로 필터링 (company__company_code_sap)
+    // company_code로 필터링 (재무정보는 company_code를 참조)
     const params = new URLSearchParams({
-      'company__company_code_sap': companyCode
+      'company__company_code': companyCode
     });
     return apiCall<CompanyFinancialStatus[]>(`/company-financial-status/?${params.toString()}`);
   },

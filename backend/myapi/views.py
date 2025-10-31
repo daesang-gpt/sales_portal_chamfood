@@ -7,9 +7,9 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.db.models import Q, Max, Sum, Value
 from django.db.models.functions import Replace
 from django.utils import timezone
-from datetime import timedelta
+from datetime import timedelta, datetime
 from .models import Company, Report, User, CompanyFinancialStatus, SalesData
-from .serializers import CompanySerializer, ReportSerializer, UserSerializer, LoginSerializer, RegisterSerializer, CompanyFinancialStatusSerializer, SalesDataSerializer
+from .serializers import CompanySerializer, ReportSerializer, UserSerializer, LoginSerializer, RegisterSerializer, CompanyFinancialStatusSerializer, SalesDataSerializer, ForgotPasswordSerializer, ChangePasswordSerializer
 from keybert import KeyBERT
 from sentence_transformers import SentenceTransformer, util
 import numpy as np
@@ -25,6 +25,11 @@ from decimal import Decimal
 import logging
 import openpyxl
 from io import BytesIO
+from django.core.mail import send_mail
+from django.conf import settings
+import secrets
+import traceback
+import string
 
 # 태그 후보 및 임베딩 캐싱
 TAG_CANDIDATES = None
@@ -64,8 +69,10 @@ class CompanyViewSet(viewsets.ModelViewSet):
         if search:
             queryset = queryset.filter(
                 Q(company_name__icontains=search) |
-                Q(username__name__icontains=search) |
-                Q(username__username__icontains=search)
+                Q(employee_name__icontains=search) |
+                Q(contact_person__icontains=search) |
+                Q(company_code__icontains=search) |
+                Q(company_code_sap__icontains=search)
             )
         if customer_classification:
             queryset = queryset.filter(customer_classification=customer_classification)
@@ -85,6 +92,12 @@ class ReportViewSet(viewsets.ModelViewSet):
     serializer_class = ReportSerializer
     permission_classes = [IsAuthenticated]
 
+    def dispatch(self, request, *args, **kwargs):
+        """요청이 들어오는지 확인하기 위한 dispatch 오버라이드"""
+        print(f"\n[ReportViewSet.dispatch] 요청 도달: {request.method} {request.path}")
+        print(f"[ReportViewSet.dispatch] action: {kwargs.get('action', 'unknown')}")
+        return super().dispatch(request, *args, **kwargs)
+
     def get_queryset(self):
         # 모든 사용자(관리자, 일반 사용자)가 전체 영업일지를 볼 수 있도록 수정
         queryset = Report.objects.all()
@@ -97,23 +110,134 @@ class ReportViewSet(viewsets.ModelViewSet):
         user = self.request.user
         company_obj = serializer.validated_data.get('company_obj')
         
+        print("=" * 80)
+        print("[perform_create] 시작")
+        print(f"[perform_create] user: {user} (id: {user.id}, type: {type(user.id)})")
+        print(f"[perform_create] company_obj: {company_obj} (type: {type(company_obj)})")
+        if company_obj:
+            print(f"[perform_create] company_obj.company_code: {company_obj.company_code} (type: {type(company_obj.company_code)})")
+            print(f"[perform_create] company_obj.pk: {company_obj.pk} (type: {type(company_obj.pk)})")
+        
+        # Oracle 호환성을 위해 author는 ID로 명시적으로 전달
         save_kwargs = {
-            'author': user,
-            'author_name': user.name,
-            'author_department': user.department,
+            'author_id': user.id,  # ForeignKey 필드에 ID 직접 전달
+            'author_name': user.name if user.name else None,
+            'author_department': user.department if user.department else None,
         }
         
         # 회사 정보 저장
         if company_obj:
-            save_kwargs['company_name'] = company_obj.company_name
-            save_kwargs['company_city_district'] = company_obj.city_district
+            save_kwargs['company_name'] = company_obj.company_name or None
+            save_kwargs['company_city_district'] = company_obj.city_district or None
+            # Oracle에서 문자열 PK ForeignKey 처리
+            # company_obj는 일반 ForeignKey이므로 company_obj_id로 문자열 PK 전달
+            save_kwargs['company_obj_id'] = company_obj.company_code
+            
+            # company_code는 to_field='company_code'로 설정된 ForeignKey
+            # save_kwargs에 문자열 값으로 직접 전달 (validated_data를 수정하는 것보다 이게 더 확실함)
+            save_kwargs['company_code'] = company_obj.company_code
+            print(f"[perform_create] company_code를 save_kwargs에 문자열로 추가: {company_obj.company_code} (타입: {type(company_obj.company_code)})")
+            
+            # validated_data에서 Company 객체 제거 (save_kwargs가 우선순위가 높으므로)
+            if 'company_code' in serializer.validated_data:
+                old_value = serializer.validated_data.pop('company_code')
+                print(f"[perform_create] validated_data에서 company_code 제거됨 (기존 값: {old_value}, 타입: {type(old_value)})")
+            
+            # company_obj도 제거 (company_obj_id로 대체)
+            if 'company_obj' in serializer.validated_data:
+                old_company_obj = serializer.validated_data.pop('company_obj')
+                print(f"[perform_create] validated_data에서 company_obj 제거됨 (company_obj_id로 대체)")
+        else:
+            # company_obj가 None인 경우 명시적으로 설정
+            save_kwargs['company_obj_id'] = None
+            save_kwargs['company_code'] = None
+            if 'company_code' in serializer.validated_data:
+                serializer.validated_data.pop('company_code')
+            if 'company_obj' in serializer.validated_data:
+                serializer.validated_data.pop('company_obj')
         
-        serializer.save(**save_kwargs)
+        # 상세 디버깅: 모든 필드의 값과 타입 출력
+        print("\n[perform_create] save_kwargs 상세:")
+        for key, value in save_kwargs.items():
+            value_type = type(value)
+            value_repr = repr(value)
+            if hasattr(value, '__class__'):
+                value_class_name = value.__class__.__name__
+            else:
+                value_class_name = str(value_type)
+            
+            # 값이 너무 길면 잘라서 표시
+            if isinstance(value, str) and len(value) > 100:
+                value_repr = value[:100] + "..."
+            
+            print(f"  {key}:")
+            print(f"    값: {value_repr}")
+            print(f"    타입: {value_type} ({value_class_name})")
+            if hasattr(value, 'pk'):
+                print(f"    pk: {value.pk} (type: {type(value.pk)})")
+            if hasattr(value, 'id'):
+                print(f"    id: {value.id} (type: {type(value.id)})")
+        
+        print(f"\n[perform_create] validated_data keys: {list(serializer.validated_data.keys())}")
+        print(f"[perform_create] validated_data 상세:")
+        for key, value in serializer.validated_data.items():
+            print(f"  {key}: {value} (type: {type(value)})")
+        
+        print("\n[perform_create] serializer.instance:", serializer.instance)
+        print("=" * 80)
+        
+        try:
+            print("[perform_create] serializer.save() 호출 시작...")
+            result = serializer.save(**save_kwargs)
+            print(f"[perform_create] serializer.save() 성공! result: {result}")
+            print(f"[perform_create] result.id: {getattr(result, 'id', 'N/A')}")
+            print("=" * 80)
+            return result
+        except Exception as save_error:
+            print("\n" + "=" * 80)
+            print("[perform_create] 저장 중 오류 발생!")
+            print(f"오류 타입: {type(save_error).__name__}")
+            print(f"오류 메시지: {str(save_error)}")
+            print("\n상세 스택 트레이스:")
+            import traceback
+            traceback.print_exc()
+            print("=" * 80)
+            raise
     
     def create(self, request, *args, **kwargs):
         """영업일지 생성 시 회사 데이터 이용 로직"""
+        # 즉시 로그 출력 (요청이 도달했는지 확인)
+        print("\n" + "=" * 80)
+        print("=" * 80)
+        print("[ReportViewSet.create] 메서드 호출됨!")
+        print("=" * 80)
+        print(f"[ReportViewSet.create] request.method: {request.method}")
+        print(f"[ReportViewSet.create] request.path: {request.path}")
+        print(f"[ReportViewSet.create] request.user: {request.user}")
+        print(f"[ReportViewSet.create] request.data type: {type(request.data)}")
+        print(f"[ReportViewSet.create] request.data: {request.data}")
+        print("=" * 80)
+        
         try:
             data = dict(request.data)
+            print(f"[ReportViewSet.create] data 변환 완료: {list(data.keys())}")
+            
+            # visitDate 날짜 변환 (Oracle 호환성을 위해 명시적으로 변환)
+            if 'visitDate' in data:
+                visit_date_str = data['visitDate']
+                if isinstance(visit_date_str, str):
+                    try:
+                        # YYYY-MM-DD 형식 파싱
+                        data['visitDate'] = datetime.strptime(visit_date_str, '%Y-%m-%d').date()
+                    except ValueError:
+                        try:
+                            # 다른 날짜 형식 시도
+                            data['visitDate'] = datetime.strptime(visit_date_str, '%Y/%m/%d').date()
+                        except ValueError:
+                            return Response({'error': f'방문일자 형식이 올바르지 않습니다: {visit_date_str}'}, status=status.HTTP_400_BAD_REQUEST)
+                elif hasattr(visit_date_str, 'date'):
+                    # 이미 date 객체인 경우
+                    data['visitDate'] = visit_date_str.date() if hasattr(visit_date_str, 'date') else visit_date_str
             
             # 회사 관련 데이터 추출
             company_location = data.get('location', '')  # 신규 회사 소재지
@@ -126,6 +250,9 @@ class ReportViewSet(viewsets.ModelViewSet):
             if data.get('company_obj'):
                 try:
                     company_code = data['company_obj']
+                    # 문자열로 변환 (Oracle 호환성)
+                    if not isinstance(company_code, str):
+                        company_code = str(company_code)
                     company_obj = Company.objects.get(company_code=company_code)
                     # 회사 데이터에서 사용품목을 가져와서 데이터에 설정
                     data['products'] = company_obj.products or company_products
@@ -178,17 +305,55 @@ class ReportViewSet(viewsets.ModelViewSet):
             data.pop('team', None)
             data.pop('location', None)  # location은 Report 모델에 없음
             
+            # 빈 문자열을 None으로 변환 (Oracle 호환성)
+            for key in ['sales_stage', 'products', 'tags', 'company_city_district']:
+                if key in data and data[key] == '':
+                    data[key] = None
+            
+            # 상세 디버깅: 데이터 출력
+            print("\n" + "=" * 80)
+            print("[create] 최종 데이터 처리")
+            print("=" * 80)
+            print(f"[create] data dictionary keys: {list(data.keys())}")
+            print("\n[create] data 상세:")
+            for key, value in data.items():
+                value_type = type(value)
+                if isinstance(value, str) and len(value) > 100:
+                    value_repr = value[:100] + "..."
+                else:
+                    value_repr = repr(value)
+                print(f"  {key}: {value_repr} (type: {value_type})")
+            
+            print(f"\n[create] company_obj: {company_obj} (type: {type(company_obj)})")
+            if company_obj:
+                print(f"[create] company_obj.company_code: {company_obj.company_code} (type: {type(company_obj.company_code)})")
+                print(f"[create] company_obj.pk: {company_obj.pk} (type: {type(company_obj.pk)})")
+            
+            print(f"[create] request.user: {request.user} (id: {request.user.id}, type: {type(request.user.id)})")
+            print("=" * 80 + "\n")
+            
             # serializer를 직접 생성하여 처리
+            print("[create] Serializer 생성 및 검증 시작...")
             serializer = self.get_serializer(data=data)
+            print("[create] Serializer.is_valid() 호출...")
             serializer.is_valid(raise_exception=True)
+            print("[create] Serializer 검증 완료!")
+            print(f"[create] validated_data: {serializer.validated_data}")
+            print("[create] perform_create 호출...")
             self.perform_create(serializer)
             headers = self.get_success_headers(serializer.data)
             return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
             
         except Exception as e:
-            print(f"ReportViewSet create 오류: {str(e)}")
+            print("\n" + "=" * 80)
+            print("[ReportViewSet.create] 예외 발생!")
+            print("=" * 80)
+            print(f"[ReportViewSet.create] 예외 타입: {type(e).__name__}")
+            print(f"[ReportViewSet.create] 예외 메시지: {str(e)}")
+            print("\n[ReportViewSet.create] 상세 스택 트레이스:")
             import traceback
             traceback.print_exc()
+            print("=" * 80 + "\n")
             return Response({'error': f'영업일지 생성 중 오류가 발생했습니다: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def update(self, request, *args, **kwargs):
@@ -266,17 +431,23 @@ def login_view(request):
         
         if user is not None:
             refresh = RefreshToken.for_user(user)
+            
+            # 최초 로그인 여부 확인
+            requires_password_change = not getattr(user, 'is_password_changed', False)
+            
             return Response({
                 'success': True,
                 'message': '로그인 성공',
                 'access_token': str(refresh.access_token),
                 'refresh_token': str(refresh),
+                'requires_password_change': requires_password_change,
                 'user': {
                     'id': user.id,
                     'name': user.name,
                     'department': user.department,
                     'employee_number': user.employee_number,
-                    'role': user.role
+                    'role': user.role,
+                    'is_password_changed': getattr(user, 'is_password_changed', False)
                 }
             }, status=status.HTTP_200_OK)
         else:
@@ -290,6 +461,160 @@ def login_view(request):
             'message': '입력 데이터가 올바르지 않습니다.',
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def forgot_password_view(request):
+    """비밀번호 찾기 - 아이디 입력 시 해당 이메일로 임시 비밀번호 전송"""
+    serializer = ForgotPasswordSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response({
+            'success': False,
+            'message': '입력 데이터가 올바르지 않습니다.',
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    username = serializer.validated_data['id']
+    
+    try:
+        user = User.objects.get(username=username)
+        
+        # 이메일이 없는 경우
+        if not user.email:
+            return Response({
+                'success': False,
+                'message': '등록된 이메일이 없습니다. 관리자에게 문의해주세요.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # 기존 비밀번호 백업 (롤백용)
+        old_password_hash = user.password
+        
+        # 임시 비밀번호 생성 (영문, 숫자, 특수문자 포함 12자리)
+        alphabet = string.ascii_letters + string.digits + string.punctuation
+        temp_password = ''.join(secrets.choice(alphabet) for i in range(12))
+        
+        # 사용자 비밀번호 업데이트
+        user.set_password(temp_password)
+        user.save()
+        
+        # 이메일 전송 - 안전하게 콘솔 백엔드 사용
+        try:
+            # 콘솔 백엔드를 직접 사용하여 SMTP 연결 오류 방지
+            from django.core.mail import get_connection
+            from django.core.mail.message import EmailMessage
+            
+            # 이메일 백엔드 확인
+            email_backend = getattr(settings, 'EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
+            
+            # SMTP 백엔드인 경우 연결 테스트를 위해 콘솔 백엔드로 대체 (개발 환경)
+            if 'smtp' in email_backend.lower() and settings.DEBUG:
+                logging.info('개발 환경에서는 콘솔 백엔드를 사용합니다.')
+                email_backend = 'django.core.mail.backends.console.EmailBackend'
+            
+            connection = get_connection(email_backend)
+            email = EmailMessage(
+                subject='[영업 포털] 임시 비밀번호 발급',
+                body=f'''
+안녕하세요, {user.name}님.
+
+영업 포털에서 요청하신 임시 비밀번호를 발급해드립니다.
+
+아이디: {user.username}
+임시 비밀번호: {temp_password}
+
+보안을 위해 로그인 후 반드시 비밀번호를 변경해주세요.
+
+감사합니다.
+                '''.strip(),
+                from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com'),
+                to=[user.email],
+                connection=connection,
+            )
+            email.send()
+            
+            return Response({
+                'success': True,
+                'message': f'{user.email}로 임시 비밀번호가 발송되었습니다.'
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            # 이메일 전송 실패 시 비밀번호 롤백
+            error_message = str(e)
+            error_type = type(e).__name__
+            logging.error(f'이메일 전송 실패 [{error_type}]: {error_message}')
+            logging.error(f'이메일 전송 상세 오류:', exc_info=True)
+            
+            try:
+                user.password = old_password_hash
+                user.save()
+                logging.info(f'비밀번호 롤백 완료: {user.username}')
+            except Exception as rollback_error:
+                logging.error(f'비밀번호 롤백 실패: {str(rollback_error)}')
+            
+            # 개발 환경에서는 상세 오류 메시지 표시, 운영 환경에서는 일반 메시지
+            if settings.DEBUG:
+                error_detail = f'{error_type}: {error_message}'
+            else:
+                error_detail = None
+            
+            return Response({
+                'success': False,
+                'message': '이메일 전송 중 오류가 발생했습니다. 비밀번호는 변경되지 않았습니다. 관리자에게 문의해주세요.',
+                'error_detail': error_detail if settings.DEBUG else None
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+    except User.DoesNotExist:
+        # 보안상 존재하지 않는 사용자라고 명확히 알리지 않음
+        return Response({
+            'success': True,
+            'message': '입력하신 아이디로 등록된 이메일이 있다면 임시 비밀번호가 발송됩니다.'
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        logging.error(f'비밀번호 찾기 오류: {str(e)}')
+        return Response({
+            'success': False,
+            'message': '처리 중 오류가 발생했습니다.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def change_password_view(request):
+    """비밀번호 변경 API"""
+    serializer = ChangePasswordSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response({
+            'success': False,
+            'message': '입력 데이터가 올바르지 않습니다.',
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    user = request.user
+    current_password = serializer.validated_data['current_password']
+    new_password = serializer.validated_data['new_password']
+    
+    # 현재 비밀번호 확인
+    if not user.check_password(current_password):
+        return Response({
+            'success': False,
+            'message': '현재 비밀번호가 올바르지 않습니다.'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # 새 비밀번호 설정
+    try:
+        user.set_password(new_password)
+        user.is_password_changed = True
+        user.save()
+        
+        return Response({
+            'success': True,
+            'message': '비밀번호가 성공적으로 변경되었습니다.'
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        logging.error(f'비밀번호 변경 오류: {str(e)}')
+        return Response({
+            'success': False,
+            'message': '비밀번호 변경 중 오류가 발생했습니다.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
@@ -833,34 +1158,83 @@ class SalesReportListView(ListAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        # 모든 사용자(관리자, 일반 사용자)가 전체 영업일지를 볼 수 있도록 수정
-        queryset = Report.objects.all()
-        
-        # 검색/필터/정렬
-        search = self.request.query_params.get('search', '').strip()
-        period = self.request.query_params.get('period', 'all')
-        ordering = self.request.query_params.get('ordering', '-visitDate')
-        company_id = self.request.query_params.get('companyId', '').strip()
+        try:
+            # 모든 사용자(관리자, 일반 사용자)가 전체 영업일지를 볼 수 있도록 수정
+            # 기본 쿼리셋 사용 (select_related는 나중에 최적화)
+            queryset = Report.objects.all()
+            
+            # 검색/필터/정렬
+            search = self.request.query_params.get('search', '').strip()
+            period = self.request.query_params.get('period', 'all')
+            ordering = self.request.query_params.get('ordering', '-visitDate')
+            company_id = self.request.query_params.get('companyId', '').strip()
 
-        if company_id:
-            queryset = queryset.filter(
-                Q(company_obj__company_code=company_id) |
-                Q(company_name=company_id)
+            if company_id:
+                # company_code FK는 to_field='company_code'로 설정되어 있으므로 직접 비교 가능
+                # company_obj FK도 함께 체크
+                # Company 객체를 먼저 찾아서 사용하면 더 정확함
+                try:
+                    company = Company.objects.get(company_code=company_id)
+                    # Company 객체가 있으면 이를 사용하여 필터링
+                    # company_obj와 company_code FK 모두 Company 객체로 비교
+                    queryset = queryset.filter(
+                        Q(company_obj=company) |
+                        Q(company_code=company) |
+                        Q(company_name=company.company_name)
+                    )
+                    print(f"[SalesReportListView] companyId 필터링 (Company 객체 사용): {company_id}")
+                except Company.DoesNotExist:
+                    # Company가 없으면 기존 방식으로 필터링 (문자열 비교)
+                    queryset = queryset.filter(
+                        Q(company_obj__company_code=company_id) |
+                        Q(company_code=company_id) |
+                        Q(company_name=company_id)
+                    )
+                    print(f"[SalesReportListView] companyId 필터링 (문자열 비교): {company_id}")
+                except Exception as e:
+                    # 기타 예외 발생 시 로깅하고 기존 방식으로 필터링 시도
+                    print(f"[SalesReportListView] companyId 필터링 중 예외 발생: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+                    # 안전한 필터링으로 폴백
+                    queryset = queryset.filter(
+                        Q(company_obj__company_code=company_id) |
+                        Q(company_name=company_id)
+                    )
+            if search:
+                queryset = queryset.filter(
+                    Q(company_name__icontains=search) |
+                    Q(author__username__icontains=search) |
+                    Q(author__name__icontains=search) |
+                    Q(author_name__icontains=search) |
+                    Q(tags__icontains=search)
+                )
+            if period in ['1m', '3m', '6m']:
+                months = int(period[0])
+                start_date = timezone.now().date() - timedelta(days=30 * months)
+                queryset = queryset.filter(visitDate__gte=start_date)
+            queryset = queryset.order_by(ordering)
+            return queryset
+        except Exception as e:
+            import traceback
+            print(f"[SalesReportListView get_queryset] 오류 발생: {str(e)}")
+            traceback.print_exc()
+            # 빈 쿼리셋 반환
+            return Report.objects.none()
+    
+    def list(self, request, *args, **kwargs):
+        try:
+            return super().list(request, *args, **kwargs)
+        except Exception as e:
+            import traceback
+            print(f"[SalesReportListView list] 오류 발생: {str(e)}")
+            traceback.print_exc()
+            from rest_framework.response import Response
+            from rest_framework import status
+            return Response(
+                {'error': f'영업일지 목록을 불러오는 중 오류가 발생했습니다: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-        if search:
-            queryset = queryset.filter(
-                Q(company_name__icontains=search) |
-                Q(author__username__icontains=search) |
-                Q(author__name__icontains=search) |
-                Q(author_name__icontains=search) |
-                Q(tags__icontains=search)
-            )
-        if period in ['1m', '3m', '6m']:
-            months = int(period[0])
-            start_date = timezone.now().date() - timedelta(days=30 * months)
-            queryset = queryset.filter(visitDate__gte=start_date)
-        queryset = queryset.order_by(ordering)
-        return queryset
 
 class CompanyFinancialStatusViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = models.CompanyFinancialStatus.objects.all()
@@ -868,18 +1242,92 @@ class CompanyFinancialStatusViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        queryset = models.CompanyFinancialStatus.objects.all()
+        from django.db import connection
         
         # 회사 코드로 필터링 (company_code 또는 company_code_sap)
         company_code = self.request.query_params.get('company__company_code', None)
         company_code_sap = self.request.query_params.get('company__company_code_sap', None)
         
-        if company_code:
-            queryset = queryset.filter(company__company_code=company_code)
-        elif company_code_sap:
-            queryset = queryset.filter(company__company_code_sap=company_code_sap)
+        # 필터링 조건이 없으면 모든 데이터 반환
+        if not company_code and not company_code_sap:
+            return models.CompanyFinancialStatus.objects.all()
         
-        return queryset
+        try:
+            # company_code_sap가 주어졌으면 company_code로 변환
+            if company_code_sap:
+                with connection.cursor() as cursor:
+                    try:
+                        cx_cursor = cursor.cursor
+                        cx_cursor.execute(
+                            "SELECT COMPANY_CODE FROM COMPANIES WHERE COMPANY_CODE_SAP = :1",
+                            [company_code_sap]
+                        )
+                        result = cx_cursor.fetchone()
+                        if not result:
+                            return models.CompanyFinancialStatus.objects.none()
+                        company_code = result[0]
+                    except Exception:
+                        cursor.execute(
+                            "SELECT COMPANY_CODE FROM COMPANIES WHERE COMPANY_CODE_SAP = %s",
+                            [company_code_sap]
+                        )
+                        result = cursor.fetchone()
+                        if not result:
+                            return models.CompanyFinancialStatus.objects.none()
+                        company_code = result[0]
+            
+            # company_code를 사용하여 재무정보 조회
+            # company_financial_status.company_id는 COMPANIES.ID (숫자)를 참조하므로
+            # JOIN을 사용하여 필터링
+            if company_code:
+                with connection.cursor() as cursor:
+                    try:
+                        cx_cursor = cursor.cursor
+                        # company_id는 숫자형이고 COMPANIES.ID를 참조
+                        cx_cursor.execute("""
+                            SELECT CFS.ID 
+                            FROM COMPANY_FINANCIAL_STATUS CFS
+                            INNER JOIN COMPANIES C ON CFS.COMPANY_ID = C.ID
+                            WHERE C.COMPANY_CODE = :1
+                        """, [company_code])
+                        ids = [row[0] for row in cx_cursor.fetchall()]
+                    except Exception:
+                        # Django 방식으로 시도
+                        cursor.execute("""
+                            SELECT CFS.ID 
+                            FROM COMPANY_FINANCIAL_STATUS CFS
+                            INNER JOIN COMPANIES C ON CFS.COMPANY_ID = C.ID
+                            WHERE C.COMPANY_CODE = %s
+                        """, [company_code])
+                        ids = [row[0] for row in cursor.fetchall()]
+                
+                if ids:
+                    return models.CompanyFinancialStatus.objects.filter(id__in=ids)
+                else:
+                    return models.CompanyFinancialStatus.objects.none()
+            else:
+                return models.CompanyFinancialStatus.objects.none()
+                
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"CompanyFinancialStatus 필터링 중 오류: {e}", exc_info=True)
+            # 오류 발생 시 빈 queryset 반환
+            return models.CompanyFinancialStatus.objects.none()
+    
+    def list(self, request, *args, **kwargs):
+        try:
+            return super().list(request, *args, **kwargs)
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"CompanyFinancialStatus 조회 중 오류: {e}", exc_info=True)
+            from rest_framework.response import Response
+            from rest_framework import status
+            return Response(
+                {'error': str(e), 'detail': '재무정보 조회 중 오류가 발생했습니다.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 class SalesDataViewSet(viewsets.ModelViewSet):
     queryset = SalesData.objects.all()
@@ -898,7 +1346,7 @@ class SalesDataViewSet(viewsets.ModelViewSet):
                 매출담당자_norm=Replace('매출담당자', Value(' '), Value(''))
             ).filter(
                 Q(매출담당자_norm__icontains=normalized_name) |
-                Q(company_obj__username=user)
+                Q(company_obj__employee_name__icontains=normalized_name)
             )
         
         # 날짜 필터링
@@ -924,7 +1372,7 @@ def download_reports_csv(request):
         # 모든 영업일지 데이터 조회
         # Oracle 타입 변환 오류를 방지하기 위해 필요한 필드만 가져오기
         reports = Report.objects.only(
-            'id', 'team', 'visitDate', 'company', 'company_obj_id', 'type', 
+            'id', 'author_department', 'visitDate', 'company_name', 'company_obj_id', 'type', 
             'products', 'content', 'tags', 'createdAt', 'author_id'
         ).select_related('author').iterator(chunk_size=100)
         
@@ -1666,62 +2114,108 @@ def get_company_unique_products(request, company_id):
         try:
             company = Company.objects.get(company_code=company_id)
         except Company.DoesNotExist:
-            # 기존 id로도 시도 (하위 호환성)
-            company = Company.objects.get(pk=company_id)
+            # 기존 id로도 시도 (하위 호환성) - 하지만 company_code가 primary_key이므로 동일한 결과
+            try:
+                company = Company.objects.get(pk=company_id)
+            except Company.DoesNotExist:
+                return Response({
+                    'error': f'회사를 찾을 수 없습니다. (company_id: {company_id})'
+                }, status=status.HTTP_404_NOT_FOUND)
         
         # 여러 방법으로 SalesData 찾기
         sales_data_qs = SalesData.objects.none()
         matched_by = None
         
-        # 방법 1: company_obj로 직접 연결된 데이터
-        if company:
-            sales_data_qs = SalesData.objects.filter(company_obj=company)
-            if sales_data_qs.exists():
-                matched_by = 'company_obj'
+        # 디버깅 정보 출력
+        print(f"[get_company_unique_products] 회사 정보:")
+        print(f"  - company_code: {company.company_code}")
+        print(f"  - company_code_sap: {company.company_code_sap}")
+        print(f"  - company_name: {company.company_name}")
         
-        # 방법 2: SAP 회사 코드로 매칭 (가장 정확한 방법)
-        if not sales_data_qs.exists() and company.company_code_sap:
-            sales_data_qs = SalesData.objects.filter(
-                코드=company.company_code_sap
-            )
-            if sales_data_qs.exists():
-                matched_by = 'sap_code'
+        # 방법 1: SAP 회사 코드로 매칭 (가장 정확한 방법 - 우선순위 1)
+        if company.company_code_sap:
+            try:
+                print(f"[get_company_unique_products] 방법 1 시도: company_code_sap='{company.company_code_sap}'로 SalesData 검색")
+                sales_data_qs = SalesData.objects.filter(코드=company.company_code_sap)
+                count = sales_data_qs.count()
+                print(f"[get_company_unique_products] 방법 1 결과: {count}개 데이터 발견")
+                if count > 0:
+                    matched_by = 'sap_code'
+            except Exception as e:
+                print(f"[get_company_unique_products] 방법 1 오류: {str(e)}")
+                print(traceback.format_exc())
         
-        # 방법 3: 회사 코드로 매칭
-        if not sales_data_qs.exists() and company.company_code:
-            sales_data_qs = SalesData.objects.filter(
-                코드=company.company_code
-            )
-            if sales_data_qs.exists():
-                matched_by = 'company_code'
-        
-        # 방법 4: 거래처명으로 매칭
+        # 방법 2: company_obj로 직접 연결된 데이터 (우선순위 2)
         if not sales_data_qs.exists():
-            sales_data_qs = SalesData.objects.filter(
-                거래처명__icontains=company.company_name
-            )
-            if sales_data_qs.exists():
-                matched_by = 'company_name'
+            try:
+                print(f"[get_company_unique_products] 방법 2 시도: company_obj로 SalesData 검색")
+                sales_data_qs = SalesData.objects.filter(company_obj=company)
+                count = sales_data_qs.count()
+                print(f"[get_company_unique_products] 방법 2 결과: {count}개 데이터 발견")
+                if count > 0:
+                    matched_by = 'company_obj'
+            except Exception as e:
+                print(f"[get_company_unique_products] 방법 2 오류: {str(e)}")
+                print(traceback.format_exc())
+        
+        # 방법 3: 회사 코드로 매칭 (우선순위 3)
+        if not sales_data_qs.exists() and company.company_code:
+            try:
+                print(f"[get_company_unique_products] 방법 3 시도: company_code='{company.company_code}'로 SalesData 검색")
+                sales_data_qs = SalesData.objects.filter(코드=company.company_code)
+                count = sales_data_qs.count()
+                print(f"[get_company_unique_products] 방법 3 결과: {count}개 데이터 발견")
+                if count > 0:
+                    matched_by = 'company_code'
+            except Exception as e:
+                print(f"[get_company_unique_products] 방법 3 오류: {str(e)}")
+                print(traceback.format_exc())
+        
+        # 방법 4: 거래처명으로 매칭 (우선순위 4)
+        if not sales_data_qs.exists() and company.company_name:
+            try:
+                print(f"[get_company_unique_products] 방법 4 시도: 거래처명='{company.company_name}'로 SalesData 검색")
+                sales_data_qs = SalesData.objects.filter(거래처명__icontains=company.company_name)
+                count = sales_data_qs.count()
+                print(f"[get_company_unique_products] 방법 4 결과: {count}개 데이터 발견")
+                if count > 0:
+                    matched_by = 'company_name'
+            except Exception as e:
+                print(f"[get_company_unique_products] 방법 4 오류: {str(e)}")
+                print(traceback.format_exc())
         
         # 유니크한 상품명 조회
-        unique_products = sales_data_qs.values_list('상품명', flat=True).distinct()
-        
-        # None 값 제거 및 필터링
-        products = [p for p in unique_products if p and p.strip()]
-        
-        return Response({
-            'products': products,
-            'count': len(products),
-            'matched_by': matched_by or 'none'
-        }, status=status.HTTP_200_OK)
+        try:
+            unique_products = sales_data_qs.values_list('상품명', flat=True).distinct()
+            
+            # None 값 제거 및 필터링
+            products = [p for p in unique_products if p and p.strip()]
+            
+            return Response({
+                'products': products,
+                'count': len(products),
+                'matched_by': matched_by or 'none'
+            }, status=status.HTTP_200_OK)
+        except Exception as e:
+            print(f"[get_company_unique_products] 상품명 조회 오류: {str(e)}")
+            print(traceback.format_exc())
+            return Response({
+                'error': f'상품명 조회 중 오류가 발생했습니다: {str(e)}',
+                'products': [],
+                'count': 0,
+                'matched_by': matched_by or 'none'
+            }, status=status.HTTP_200_OK)  # 에러가 발생해도 빈 배열 반환
         
     except Company.DoesNotExist:
         return Response({
-            'error': '회사를 찾을 수 없습니다.'
+            'error': f'회사를 찾을 수 없습니다. (company_id: {company_id})'
         }, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
+        print(f"[get_company_unique_products] 전체 오류: {str(e)}")
+        print(traceback.format_exc())
         return Response({
-            'error': f'데이터 조회 중 오류가 발생했습니다: {str(e)}'
+            'error': f'데이터 조회 중 오류가 발생했습니다: {str(e)}',
+            'traceback': traceback.format_exc()
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
@@ -1734,13 +2228,44 @@ def get_company_sales_data(request, company_id):
             company = Company.objects.get(company_code=company_id)
         except Company.DoesNotExist:
             # 기존 id로도 시도 (하위 호환성)
-            company = Company.objects.get(pk=company_id)
+            try:
+                company = Company.objects.get(pk=company_id)
+            except Company.DoesNotExist:
+                return Response({
+                    'error': '회사를 찾을 수 없습니다.'
+                }, status=status.HTTP_404_NOT_FOUND)
+        
         company_code_sap = company.company_code_sap
         
+        # company_code_sap가 없으면 빈 데이터 반환 (400 에러 대신)
         if not company_code_sap:
+            # 최근 6개월 날짜 범위 계산
+            end_date = timezone.now().date()
+            current_date = timezone.now()
+            all_months = []
+            for i in range(6):
+                month_date = current_date - timedelta(days=30*i)
+                month_key = month_date.strftime('%Y-%m')
+                all_months.append(month_key)
+            all_months.reverse()
+            
+            # 빈 데이터 구조 반환
+            sales_chart_data = []
+            for month in all_months:
+                sales_chart_data.append({
+                    'month': month,
+                    '매출금액': 0,
+                    '매출이익': 0,
+                    'GP': 0
+                })
+            
             return Response({
-                'error': 'SAP 회사코드가 없습니다.'
-            }, status=status.HTTP_400_BAD_REQUEST)
+                'company_name': company.company_name,
+                'company_code_sap': None,
+                'sales_chart_data': sales_chart_data,
+                'products_chart_data': [],
+                'total_records': 0
+            }, status=status.HTTP_200_OK)
         
         # 최근 6개월 날짜 범위 계산
         end_date = timezone.now().date()
