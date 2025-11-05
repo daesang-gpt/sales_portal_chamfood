@@ -13,6 +13,7 @@ import { ArrowLeft, Save, Loader2 } from "lucide-react"
 import Link from "next/link"
 import { companyApi, Company } from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
+import { LocationSelect } from "@/components/ui/location-select"
 
 export default function NewCompanyPage() {
   const router = useRouter()
@@ -254,11 +255,10 @@ export default function NewCompanyPage() {
 
               <div className="space-y-2">
                 <Label htmlFor="city_district">시/구</Label>
-                <Input
-                  id="city_district"
+                <LocationSelect
                   value={formData.city_district}
-                  onChange={(e) => handleInputChange("city_district", e.target.value)}
-                  placeholder="예: 서울특별시 강남구"
+                  onChange={(value) => handleInputChange("city_district", value)}
+                  placeholder="지역을 선택하세요"
                 />
               </div>
 

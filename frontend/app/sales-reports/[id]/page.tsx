@@ -142,6 +142,22 @@ export default function SalesReportDetailPage() {
   // 태그 문자열을 배열로 변환
   const tags = report.tags ? report.tags.split(',').map(tag => tag.trim()).filter(tag => tag) : []
 
+  const getSalesStageStyle = (stage: string | null | undefined) => {
+    if (!stage) {
+      return 'bg-gray-100 text-gray-600';
+    }
+    
+    const stageStyles: Record<string, string> = {
+      '초기 컨택': 'bg-gradient-to-r from-gray-50 to-gray-100 text-gray-700 border-gray-200',
+      '협상 진행(니즈 파악)': 'bg-gradient-to-r from-gray-200 to-gray-300 text-gray-800 border-gray-300',
+      '계약 체결(거래처 등록)': 'bg-gradient-to-r from-gray-300 to-gray-400 text-gray-900 border-gray-400',
+      '납품 관리': 'bg-gradient-to-r from-gray-500 to-gray-600 text-white border-gray-600',
+      '관계 유지': 'bg-gradient-to-r from-gray-700 to-gray-800 text-white border-gray-800',
+    };
+    
+    return stageStyles[stage] || 'bg-gray-100 text-gray-600';
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -255,6 +271,7 @@ export default function SalesReportDetailPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>방문일자</TableHead>
+                    <TableHead>영업단계</TableHead>
                     <TableHead>미팅 내용(이슈사항)</TableHead>
                     <TableHead>작성자</TableHead>
                     <TableHead>영업형태</TableHead>
@@ -267,9 +284,19 @@ export default function SalesReportDetailPage() {
                     return (
                       <TableRow key={r.id} className={isCurrent ? "bg-gray-200 font-semibold" : "hover:bg-gray-50 cursor-pointer"} onClick={() => !isCurrent && router.push(`/sales-reports/${r.id}`)}>
                         <TableCell>{new Date(r.visitDate).toLocaleDateString('ko-KR')}</TableCell>
+                        <TableCell>
+                          <Badge 
+                            variant="outline" 
+                            className={`${getSalesStageStyle((r as any).sales_stage)} border`}
+                          >
+                            {(r as any).sales_stage || '미지정'}
+                          </Badge>
+                        </TableCell>
                         <TableCell>{r.content.slice(0, 40)}{r.content.length > 40 ? '...' : ''}</TableCell>
                         <TableCell>{(r as any).author_name || ''}</TableCell>
-                        <TableCell><Badge variant={r.type === "대면" ? "default" : "secondary"}>{r.type}</Badge></TableCell>
+                        <TableCell>
+                          <Badge variant={r.type === "대면" ? "default" : "secondary"}>{r.type}</Badge>
+                        </TableCell>
                         <TableCell className="text-center">{isCurrent ? <span className="text-gray-700 font-semibold">현재</span> : <Button size="sm" variant="outline">이동</Button>}</TableCell>
                       </TableRow>
                     )

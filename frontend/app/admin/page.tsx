@@ -38,7 +38,7 @@ export default function AdminPage() {
     console.log('업로드 함수 호출됨');
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.csv,.xlsx';
+    input.accept = '.csv,.xlsx,.tsv';
     input.onchange = async (event) => {
       const file = (event.target as HTMLInputElement).files?.[0];
       console.log('선택된 파일:', file);
@@ -194,7 +194,7 @@ export default function AdminPage() {
           <Card>
             <CardHeader>
               <CardTitle>매출 데이터 관리</CardTitle>
-              <CardDescription>실제 매출 데이터를 CSV/XLSX 파일로 업로드하고 대시보드 차트에 반영합니다.</CardDescription>
+              <CardDescription>실제 매출 데이터를 CSV/XLSX/TSV 파일로 업로드하고 대시보드 차트에 반영합니다.</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
@@ -202,7 +202,7 @@ export default function AdminPage() {
                   className="w-full"
                   onClick={() => uploadSalesData()}
                 >
-                  매출 데이터 업로드 (CSV/XLSX)
+                  매출 데이터 업로드 (CSV/XLSX/TSV)
                 </Button>
                 <p className="text-xs text-gray-500 text-center">
                   필수 컬럼: 매출일자, 거래처명, 매출금액, 매출부서, 매출담당자 등

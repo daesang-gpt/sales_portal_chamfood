@@ -20,6 +20,7 @@ import { salesReportApi, companyApi } from "@/lib/api"
 import { getUserFromToken } from "@/lib/auth"
 import dynamic from "next/dynamic"
 import { fetchRecommendedTags } from '@/lib/api'
+import { LocationSelect } from "@/components/ui/location-select"
 
 // CompanySearchInput을 클라이언트에서만 로드
 const CompanySearchInput = dynamic(
@@ -35,6 +36,11 @@ export default function NewSalesReportPage() {
   const [date, setDate] = useState<Date>()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState({
+    visitDate: '',
+    company: '',
+    content: ''
+  })
   const [formData, setFormData] = useState({
     company: "",
     company_obj: undefined as string | undefined, // company_code
@@ -86,8 +92,37 @@ export default function NewSalesReportPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
+    // 에러 초기화
+    setError(null)
+    setFieldErrors({
+      visitDate: '',
+      company: '',
+      content: ''
+    })
+
+    const missingFields = []
+
     if (!date) {
-      setError('방문일자를 선택해주세요.')
+      missingFields.push('방문일자')
+    }
+
+    if (!formData.company || !formData.company.trim()) {
+      missingFields.push('회사명')
+    }
+
+    if (!formData.content || !formData.content.trim()) {
+      missingFields.push('미팅 내용')
+    }
+
+    if (!formData.type) {
+      missingFields.push('영업형태')
+    }
+
+    if (missingFields.length > 0) {
+      const errorMessage = missingFields.length === 1 
+        ? `${missingFields[0]}을(를) 입력해주세요.`
+        : `${missingFields.join(', ')}을(를) 입력해주세요.`
+      setError(errorMessage)
       return
     }
 
@@ -125,8 +160,9 @@ export default function NewSalesReportPage() {
         }
       }
 
+      // date는 이미 위에서 검증되었으므로 non-null assertion 사용
       const reportData = {
-        visitDate: date.toISOString().split('T')[0], // YYYY-MM-DD 형식
+        visitDate: date!.toISOString().split('T')[0], // YYYY-MM-DD 형식
         company: formData.company,
         company_obj: companyCode || null, // backend expects company_code (string) as PK
         sales_stage: formData.sales_stage || null,
@@ -190,11 +226,6 @@ export default function NewSalesReportPage() {
           <CardDescription>영업 활동 내용을 상세히 기록해주세요.</CardDescription>
         </CardHeader>
         <CardContent>
-          {error && (
-            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
-              <p className="text-red-600 text-sm">{error}</p>
-            </div>
-          )}
 
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* 1. 방문일자 */}
@@ -228,10 +259,10 @@ export default function NewSalesReportPage() {
             {!formData.company_obj && formData.company && (
               <div className="space-y-2">
                 <Label>소재지 (신규 회사) *</Label>
-                <Input
+                <LocationSelect
                   value={formData.location}
-                  onChange={(e) => handleInputChange("location", e.target.value)}
-                  placeholder="시/구까지 입력해주세요. ex. 경기도 하남시, 서울 성동구"
+                  onChange={(value) => handleInputChange("location", value)}
+                  placeholder="지역을 선택하세요"
                   required
                 />
               </div>
@@ -293,7 +324,6 @@ export default function NewSalesReportPage() {
                 onChange={(e) => handleInputChange("content", e.target.value)}
                 placeholder="영업 활동 내용을 상세히 기록해주세요..."
                 rows={6}
-                required
               />
             </div>
 
@@ -313,6 +343,13 @@ export default function NewSalesReportPage() {
                 placeholder="쉼표로 구분하여 입력 (예: 신규고객, 대량주문)"
               />
             </div>
+
+            {/* 에러 메시지 */}
+            {error && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-md">
+                <p className="text-red-600 text-sm">{error}</p>
+              </div>
+            )}
 
             <div className="flex justify-end space-x-4 pt-4">
               <Button type="button" variant="outline" asChild disabled={loading}>

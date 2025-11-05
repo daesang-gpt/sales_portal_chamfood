@@ -173,23 +173,23 @@ export default function CompanyDetailPage() {
     try {
       setLoading(true);
       await companyApi.deleteCompany(company.company_code);
-      toast({ title: '삭제 완료', description: '회사가 삭제되었습니다.' });
+      alert('회사가 삭제되었습니다.');
       router.push('/companies');
     } catch (err: any) {
+      console.error('회사 삭제 오류:', err);
+      
       let msg = '회사 삭제 중 오류가 발생했습니다.';
-      // Error 객체이면서 message가 있으면 그대로 사용
+      
+      // Error 객체의 message를 우선 사용 (apiCall에서 적절히 처리된 메시지)
       if (err instanceof Error && err.message) {
         msg = err.message;
       }
-      // Error 객체가 아니고 error 필드가 있으면 사용
-      else if (err && typeof err === 'object' && 'error' in err) {
-        msg = (err as any).error;
+      // 직접 error 필드가 있는 경우 (백엔드 응답)
+      else if (err && typeof err === 'object' && 'error' in err && err.error) {
+        msg = err.error;
       }
-      // 그래도 없으면 전체 stringify
-      else if (err) {
-        msg = JSON.stringify(err);
-      }
-      toast({ title: '삭제 불가', description: msg, variant: 'destructive' });
+      
+      // alert만 사용 (toast 대신)
       alert(msg);
     } finally {
       setLoading(false);
@@ -212,6 +212,29 @@ export default function CompanyDetailPage() {
 
   console.log('assetChartData', assetChartData);
   console.log('profitChartData', profitChartData);
+
+  // 커스텀 툴팁 컴포넌트 (최근자산규모용)
+  const AssetTooltip = ({ active, payload, label }: any) => {
+    if (!active || !payload || payload.length === 0) return null;
+    
+    // 총자산, 자본금, 자본총계 순서로 정렬
+    const orderedPayload = [
+      payload.find((p: any) => p.dataKey === '총자산'),
+      payload.find((p: any) => p.dataKey === '자본금'),
+      payload.find((p: any) => p.dataKey === '자본총계')
+    ].filter(Boolean);
+    
+    return (
+      <div className="bg-white/95 border rounded-md p-3 shadow">
+        <div className="text-sm font-medium mb-1">{label}년</div>
+        {orderedPayload.map((entry: any, index: number) => (
+          <div key={index} className="text-xs text-gray-700">
+            <span style={{ color: entry.color }}>●</span> {entry.name}: {entry.value.toLocaleString()} 천원
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   // 커스텀 툴팁 컴포넌트 (최근영업실적용)
   const CustomTooltip = ({ active, payload, label }: any) => {
@@ -458,7 +481,7 @@ export default function CompanyDetailPage() {
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="year" />
                   <YAxis tickFormatter={v => v.toLocaleString()} width={80} minTickGap={2} tickMargin={8} />
-                  <Tooltip formatter={(v: number) => v.toLocaleString()} />
+                  <Tooltip content={<AssetTooltip />} />
                   <Bar dataKey="총자산" fill="#1B3A5D" />
                   <Bar dataKey="자본금" fill="#4B2991" />
                   <Bar dataKey="자본총계" fill="#15803D" />
@@ -683,6 +706,22 @@ function CompanySalesReportList({ companyId }: { companyId: string }) {
   const [showAll, setShowAll] = useState(false);
   const router = useRouter();
 
+  const getSalesStageStyle = (stage: string | null | undefined) => {
+    if (!stage) {
+      return 'bg-gray-100 text-gray-600';
+    }
+    
+    const stageStyles: Record<string, string> = {
+      '초기 컨택': 'bg-gradient-to-r from-gray-50 to-gray-100 text-gray-700 border-gray-200',
+      '협상 진행(니즈 파악)': 'bg-gradient-to-r from-gray-200 to-gray-300 text-gray-800 border-gray-300',
+      '계약 체결(거래처 등록)': 'bg-gradient-to-r from-gray-300 to-gray-400 text-gray-900 border-gray-400',
+      '납품 관리': 'bg-gradient-to-r from-gray-500 to-gray-600 text-white border-gray-600',
+      '관계 유지': 'bg-gradient-to-r from-gray-700 to-gray-800 text-white border-gray-800',
+    };
+    
+    return stageStyles[stage] || 'bg-gray-100 text-gray-600';
+  };
+
   useEffect(() => {
     const fetchReports = async () => {
       if (!companyId) return;
@@ -724,6 +763,7 @@ function CompanySalesReportList({ companyId }: { companyId: string }) {
               <TableHeader>
                 <TableRow>
                   <TableHead>방문일자</TableHead>
+                  <TableHead>영업단계</TableHead>
                   <TableHead>미팅 내용(이슈사항)</TableHead>
                   <TableHead>작성자</TableHead>
                   <TableHead>영업형태</TableHead>
@@ -734,9 +774,19 @@ function CompanySalesReportList({ companyId }: { companyId: string }) {
                 {(showAll ? reports : reports.slice(0, 10)).map((r) => (
                   <TableRow key={r.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => router.push(`/sales-reports/${r.id}`)}>
                     <TableCell>{typeof window !== 'undefined' ? new Date(r.visitDate).toLocaleDateString('ko-KR') : r.visitDate}</TableCell>
+                    <TableCell>
+                      <Badge 
+                        variant="outline" 
+                        className={`${getSalesStageStyle((r as any).sales_stage)} border`}
+                      >
+                        {(r as any).sales_stage || '미지정'}
+                      </Badge>
+                    </TableCell>
                     <TableCell>{r.content.slice(0, 40)}{r.content.length > 40 ? '...' : ''}</TableCell>
                     <TableCell>{r.author_name}</TableCell>
-                    <TableCell><Badge variant={r.type === "대면" ? "default" : "secondary"}>{r.type}</Badge></TableCell>
+                    <TableCell>
+                      <Badge variant={r.type === "대면" ? "default" : "secondary"}>{r.type}</Badge>
+                    </TableCell>
                     <TableCell className="text-center"><Button size="sm" variant="outline" onClick={e => {e.stopPropagation(); router.push(`/sales-reports/${r.id}`)}}>상세보기</Button></TableCell>
                   </TableRow>
                 ))}

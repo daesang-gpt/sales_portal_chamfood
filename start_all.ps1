@@ -68,9 +68,14 @@ function Start-All {
                 . ".\venv\Scripts\Activate.ps1" 
             }
             $env:DJANGO_SETTINGS_MODULE = "settings.development"
-            Write-Host "[backend] running: python manage.py runserver 0.0.0.0:8000"
-            python manage.py runserver 0.0.0.0:8000
+            Write-Host "[backend] Running: python manage.py runserver 0.0.0.0:8000" -ForegroundColor Cyan
+            Write-Host "[backend] Starting Django server..." -ForegroundColor Yellow
+            python manage.py runserver 0.0.0.0:8000 2>&1 | ForEach-Object {
+                Write-Host "[backend] $_" -ForegroundColor Green
+            }
         } catch {
+            Write-Host "[backend] ERROR: $_" -ForegroundColor Red
+            Write-Host "[backend] Stack trace: $($_.ScriptStackTrace)" -ForegroundColor Red
             Write-Error "[backend] failed: $_"
         }
     } -ArgumentList $ScriptDir
@@ -85,19 +90,48 @@ function Start-All {
             
             # Clean .next folder to prevent file system errors
             if (Test-Path ".next") {
-                Write-Host "[frontend] Cleaning .next folder to prevent file system errors..."
+                Write-Host "[frontend] Cleaning .next folder to prevent file system errors..." -ForegroundColor Yellow
                 Remove-Item -Recurse -Force ".next" -ErrorAction SilentlyContinue
             }
             
-            Write-Host "[frontend] running: npm run dev:external"
-            npm run dev:external
+            Write-Host "[frontend] Running: npm run dev:external" -ForegroundColor Cyan
+            Write-Host "[frontend] Starting Next.js server..." -ForegroundColor Yellow
+            npm run dev:external 2>&1 | ForEach-Object {
+                Write-Host "[frontend] $_" -ForegroundColor Green
+            }
         } catch {
+            Write-Host "[frontend] ERROR: $_" -ForegroundColor Red
+            Write-Host "[frontend] Stack trace: $($_.ScriptStackTrace)" -ForegroundColor Red
             Write-Error "[frontend] failed: $_"
         }
     } -ArgumentList $ScriptDir
     Write-Host "Frontend job started with ID: $($frontendJob.Id)" -ForegroundColor Green
 
-    Write-Host "Started as background jobs. Use 'Get-Job' and 'Receive-Job -Keep' to view logs." -ForegroundColor Green
+    # Wait a bit and check server status
+    Write-Host "Waiting for servers to start..." -ForegroundColor Yellow
+    Start-Sleep -Seconds 5
+
+    # Check backend status
+    $backendRunning = Test-NetConnection -ComputerName localhost -Port 8000 -InformationLevel Quiet -WarningAction SilentlyContinue
+    if ($backendRunning) {
+        Write-Host "Backend server is running on port 8000" -ForegroundColor Green
+    } else {
+        Write-Host "Warning: Backend server may not be running. Check logs with: Receive-Job -Name backend -Keep" -ForegroundColor Yellow
+    }
+
+    # Check frontend status
+    $frontendRunning = Test-NetConnection -ComputerName localhost -Port 3000 -InformationLevel Quiet -WarningAction SilentlyContinue
+    if ($frontendRunning) {
+        Write-Host "Frontend server is running on port 3000" -ForegroundColor Green
+    } else {
+        Write-Host "Warning: Frontend server may not be running. Check logs with: Receive-Job -Name frontend -Keep" -ForegroundColor Yellow
+    }
+
+    Write-Host "`nStarted as background jobs. Use the following commands to view logs:" -ForegroundColor Green
+    Write-Host "  - View backend logs: Receive-Job -Name backend -Keep" -ForegroundColor Cyan
+    Write-Host "  - View frontend logs: Receive-Job -Name frontend -Keep" -ForegroundColor Cyan
+    Write-Host "  - View all jobs: Get-Job" -ForegroundColor Cyan
+    Write-Host "  - Stop all: Stop-All" -ForegroundColor Cyan
 }
 
 function Stop-All {

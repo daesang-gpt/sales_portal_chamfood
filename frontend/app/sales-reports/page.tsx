@@ -100,6 +100,22 @@ export default function SalesReportsPage() {
     return variants[type] || 'outline';
   };
 
+  const getSalesStageStyle = (stage: string | null | undefined) => {
+    if (!stage) {
+      return 'bg-gray-100 text-gray-600';
+    }
+    
+    const stageStyles: Record<string, string> = {
+      '초기 컨택': 'bg-gradient-to-r from-gray-50 to-gray-100 text-gray-700 border-gray-200',
+      '협상 진행(니즈 파악)': 'bg-gradient-to-r from-gray-200 to-gray-300 text-gray-800 border-gray-300',
+      '계약 체결(거래처 등록)': 'bg-gradient-to-r from-gray-300 to-gray-400 text-gray-900 border-gray-400',
+      '납품 관리': 'bg-gradient-to-r from-gray-500 to-gray-600 text-white border-gray-600',
+      '관계 유지': 'bg-gradient-to-r from-gray-700 to-gray-800 text-white border-gray-800',
+    };
+    
+    return stageStyles[stage] || 'bg-gray-100 text-gray-600';
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -219,18 +235,31 @@ export default function SalesReportsPage() {
                           <Badge variant={getTypeBadge(report.type)}>
                             {report.type}
                           </Badge>
-                          <Badge variant="outline">{(report as any).sales_stage || '미지정'}</Badge>
+                          <Badge 
+                            variant="outline" 
+                            className={`${getSalesStageStyle((report as any).sales_stage)} border`}
+                          >
+                            {(report as any).sales_stage || '미지정'}
+                          </Badge>
                         </div>
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-1 items-center">
-                          {showTags.map((tag: string, index: number) => (
-                            <Badge key={index} variant="outline" className="text-xs">
-                              {tag.trim()}
+                          {tagsArr.length > 0 ? (
+                            <>
+                              {showTags.map((tag: string, index: number) => (
+                                <Badge key={index} variant="outline" className="text-xs">
+                                  {tag.trim()}
+                                </Badge>
+                              ))}
+                              {tagsArr.length > 3 && (
+                                <span className="text-xs text-muted-foreground ml-1">...</span>
+                              )}
+                            </>
+                          ) : (
+                            <Badge variant="outline" className="text-xs">
+                              없음
                             </Badge>
-                          ))}
-                          {tagsArr.length > 3 && (
-                            <span className="text-xs text-muted-foreground ml-1">...</span>
                           )}
                         </div>
                       </TableCell>

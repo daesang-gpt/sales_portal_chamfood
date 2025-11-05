@@ -13,13 +13,14 @@ import Link from "next/link"
 import { salesReportApi, companyApi, SalesReport, Company } from "@/lib/api"
 import dynamic from "next/dynamic"
 import { fetchRecommendedTags } from '@/lib/api'
+import { LocationSelect } from "@/components/ui/location-select"
 
 // CompanySearchInput을 클라이언트에서만 로드
 const CompanySearchInput = dynamic(
   () => import("@/components/ui/company-search-input").then(mod => ({ default: mod.CompanySearchInput })),
   { 
     ssr: false,
-    loading: () => <Input placeholder="로딩 중..." disabled required />
+    loading: () => <Input placeholder="로딩 중..." disabled />
   }
 )
 
@@ -31,6 +32,11 @@ export default function EditSalesReportPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState({
+    visitDate: '',
+    company: '',
+    content: ''
+  })
   const [companies, setCompanies] = useState<Company[]>([])
   const [companiesLoading, setCompaniesLoading] = useState(true)
   const [formData, setFormData] = useState({
@@ -38,12 +44,15 @@ export default function EditSalesReportPage() {
     company_obj: undefined as string | null | undefined, // company_code (string)
     sales_stage: "",
     type: "",
+    location: "",
     products: "",
     content: "",
     tags: "",
     visitDate: "",
   })
   const [tagLoading, setTagLoading] = useState(false)
+  const [isNewCompany, setIsNewCompany] = useState(false)
+  const [productSuggestions, setProductSuggestions] = useState<string[]>([])
 
   useEffect(() => {
     fetchCompanies()
@@ -73,6 +82,7 @@ export default function EditSalesReportPage() {
         company_obj: report.company_code || undefined,
         sales_stage: (report as any).sales_stage || "",
         type: report.type,
+        location: "", // 기존 영업일지 수정 시에는 소재지 필요 없음
         products: report.products,
         content: report.content,
         tags: report.tags,
@@ -96,18 +106,29 @@ export default function EditSalesReportPage() {
       company_obj: companyId
     }))
     
-    // 회사가 선택된 경우 해당 회사의 데이터 불러오기
+    // 회사가 선택된 경우
     if (companyId) {
+      setIsNewCompany(false)
+      // 해당 회사의 유니크한 상품명 불러오기
       try {
-        const company = await companyApi.getCompany(companyId);
-        setFormData(prev => ({
-          ...prev,
-          products: company.products || ''
-        }));
+        const response = await companyApi.getUniqueProducts(companyId);
+        // 중복 제거, 빈 값 제거, 가나다순 정렬
+        const uniqueProducts = [...new Set(response.products || [])]
+          .filter(p => p && p.trim())
+          .sort((a, b) => a.localeCompare(b, 'ko')); // 한국어 가나다순 정렬
+        setProductSuggestions(uniqueProducts);
+        
+        // 사용품목 입력칸에 자동으로 채우기 (각 상품마다 줄바꿈)
+        if (uniqueProducts.length > 0) {
+          setFormData(prev => ({ ...prev, products: uniqueProducts.join(',\n') }));
+        }
       } catch (err) {
-        console.error('회사 정보 불러오기 오류:', err);
+        console.error('상품명 조회 오류:', err);
+        setProductSuggestions([]);
       }
     } else {
+      setIsNewCompany(true)
+      setProductSuggestions([])
       // 회사 선택이 해제된 경우 필드 초기화
       setFormData(prev => ({
         ...prev,
@@ -118,16 +139,53 @@ export default function EditSalesReportPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    // 에러 초기화
+    setError(null)
+    setFieldErrors({
+      visitDate: '',
+      company: '',
+      content: ''
+    })
+
+    const missingFields = []
+
     if (!formData.visitDate) {
-      setError('방문일자를 입력해주세요.')
+      missingFields.push('방문일자')
+    }
+
+    if (!formData.company || !formData.company.trim()) {
+      missingFields.push('회사명')
+    }
+
+    if (!formData.content || !formData.content.trim()) {
+      missingFields.push('미팅 내용')
+    }
+
+    if (!formData.type) {
+      missingFields.push('영업형태')
+    }
+
+    if (missingFields.length > 0) {
+      const errorMessage = missingFields.length === 1 
+        ? `${missingFields[0]}을(를) 입력해주세요.`
+        : `${missingFields.join(', ')}을(를) 입력해주세요.`
+      setError(errorMessage)
       return
     }
+
     setSaving(true)
     setError(null)
     let companyCode = formData.company_obj
     try {
       // 저장 시점에 회사 id가 없으면 자동 등록
       if (!companyCode && formData.company) {
+        // 신규 회사인 경우 소재지 필수 체크
+        if (!formData.location.trim()) {
+          setError('신규 회사의 경우 소재지를 입력해주세요.')
+          setSaving(false)
+          return
+        }
+        
         try {
           const company = await companyApi.autoCreateCompany(formData.company)
           companyCode = company.company_code // company_code 문자열
@@ -140,9 +198,9 @@ export default function EditSalesReportPage() {
       const submitData = { 
         ...formData, 
         company_obj: companyCode || null,
-        visitDate: formData.visitDate // 날짜 형식 확인
+        visitDate: formData.visitDate, // 날짜 형식 확인
+        location: isNewCompany ? formData.location : undefined, // 신규 회사인 경우에만 소재지 포함
       }
-      console.log('제출 데이터:', submitData)
       await salesReportApi.updateReport(Number(params.id), submitData)
       router.push(`/sales-reports/${params.id}?page=${page}`)
     } catch (err) {
@@ -220,11 +278,6 @@ export default function EditSalesReportPage() {
           <CardDescription>필요한 정보를 수정 후 저장하세요.</CardDescription>
         </CardHeader>
         <CardContent>
-          {error && (
-            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
-              <p className="text-red-600 text-sm">{error}</p>
-            </div>
-          )}
 
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* 1. 방문일자 */}
@@ -234,7 +287,6 @@ export default function EditSalesReportPage() {
                 type="date"
                 value={formData.visitDate}
                 onChange={e => handleInputChange("visitDate", e.target.value)}
-                required
               />
             </div>
 
@@ -243,11 +295,24 @@ export default function EditSalesReportPage() {
               <Label>회사명 *</Label>
               <CompanySearchInput
                 value={formData.company}
-                selectedCompanyId={formData.company_obj}
+                selectedCompanyId={formData.company_obj || undefined}
                 onChange={handleCompanyChange}
                 placeholder="회사명을 입력하거나 선택하세요"
               />
             </div>
+
+            {/* 2-1. 소재지 (신규 회사만) */}
+            {!formData.company_obj && formData.company && (
+              <div className="space-y-2">
+                <Label>소재지 (신규 회사) *</Label>
+                <LocationSelect
+                  value={formData.location}
+                  onChange={(value) => handleInputChange("location", value)}
+                  placeholder="지역을 선택하세요"
+                  required
+                />
+              </div>
+            )}
 
             {/* 3-0. 영업단계 */}
             <div className="space-y-2">
@@ -289,7 +354,7 @@ export default function EditSalesReportPage() {
                 id="products"
                 value={formData.products || ''}
                 onChange={e => handleInputChange("products", e.target.value)}
-                placeholder="사용품목을 입력하세요."
+                placeholder="기존 회사 선택 시 판매했던 상품명이 자동으로 채워집니다. 신규 회사인 경우, 주로 사용하는 품목을 입력해주세요."
                 rows={3}
                 className="resize-none"
               />
@@ -304,7 +369,6 @@ export default function EditSalesReportPage() {
                 onChange={e => handleInputChange("content", e.target.value)}
                 placeholder="영업 활동 내용을 상세히 기록해주세요..."
                 rows={6}
-                required
               />
             </div>
 
@@ -324,6 +388,14 @@ export default function EditSalesReportPage() {
                 placeholder="쉼표로 구분하여 입력 (예: 신규고객, 대량주문)"
               />
             </div>
+
+            {/* 에러 메시지 */}
+            {error && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-md">
+                <p className="text-red-600 text-sm">{error}</p>
+              </div>
+            )}
+
             <div className="flex justify-end space-x-4">
               <Button type="button" variant="outline" asChild disabled={saving}>
                 <Link href={`/sales-reports/${params.id}?page=${page}`}>취소</Link>

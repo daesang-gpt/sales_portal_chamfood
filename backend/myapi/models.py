@@ -126,12 +126,10 @@ class Report(models.Model):
     author_department = models.CharField(max_length=100, blank=True, null=True, verbose_name='팀명')  # 팀명 저장
     
     # 방문일자
-    visitDate = models.DateField(verbose_name='방문일자')
+    visitDate = models.DateField(verbose_name='방문일자', db_column='visit_date')
     
-    # 회사 관련 (저장 필드)
-    company_obj = models.ForeignKey(Company, on_delete=models.SET_NULL, null=True, blank=True, related_name='reports', verbose_name='회사ID')  # 신규 생성 UI 용 참조
-    # 회사코드 FK (문자열 PK에 연결)
-    company_code = models.ForeignKey(Company, to_field='company_code', db_column='company_code', on_delete=models.SET_NULL, null=True, blank=True, related_name='reports_by_code', verbose_name='회사코드')
+    # 회사 관련 (저장 필드) - company_code FK만 사용 (company_obj 제거)
+    company_code = models.ForeignKey(Company, to_field='company_code', db_column='company_code', on_delete=models.SET_NULL, null=True, blank=True, related_name='reports', verbose_name='회사코드')
     company_name = models.CharField(max_length=200, blank=True, null=True, verbose_name='회사명')  # 회사명 저장
     company_city_district = models.CharField(max_length=100, blank=True, null=True, verbose_name='소재지(시/구)')  # 소재지 저장
     
@@ -161,7 +159,7 @@ class Report(models.Model):
     tags = models.CharField(max_length=200, blank=True, verbose_name='태그')
     
     # 작성일
-    createdAt = models.DateTimeField(auto_now_add=True, verbose_name='작성일')
+    createdAt = models.DateTimeField(auto_now_add=True, verbose_name='작성일', db_column='created_at')
 
     def __str__(self):
         return f"{self.company_name or 'Unknown'} - {self.visitDate}"
@@ -172,7 +170,7 @@ class Report(models.Model):
         verbose_name_plural = '영업일지들'
 
 class CompanyFinancialStatus(models.Model):
-    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='financial_statuses', verbose_name='회사', db_column='company_id')
+    company = models.ForeignKey(Company, to_field='company_code', on_delete=models.CASCADE, related_name='financial_statuses', verbose_name='회사', db_column='company_code')
     fiscal_year = models.DateField(verbose_name='결산년도')
     total_assets = models.BigIntegerField(verbose_name='총자산')
     capital = models.BigIntegerField(verbose_name='자본금')
@@ -198,43 +196,40 @@ class CompanyFinancialStatus(models.Model):
 
 class SalesData(models.Model):
     """실제 매출 데이터 모델"""
-    매출일자 = models.DateField(verbose_name='매출일자')
-    코드 = models.CharField(max_length=50, blank=True, null=True, verbose_name='코드')
-    거래처명 = models.CharField(max_length=200, verbose_name='거래처명')
-    매출부서 = models.CharField(max_length=100, blank=True, null=True, verbose_name='매출부서')
-    매출담당자 = models.CharField(max_length=100, blank=True, null=True, verbose_name='매출담당자')
-    유통형태 = models.CharField(max_length=100, blank=True, null=True, verbose_name='유통형태')
-    상품코드 = models.CharField(max_length=100, blank=True, null=True, verbose_name='상품코드')
-    상품명 = models.CharField(max_length=200, blank=True, null=True, verbose_name='상품명')
-    브랜드 = models.CharField(max_length=100, blank=True, null=True, verbose_name='브랜드')
-    축종 = models.CharField(max_length=100, blank=True, null=True, verbose_name='축종')
-    부위 = models.CharField(max_length=100, blank=True, null=True, verbose_name='부위')
-    원산지 = models.CharField(max_length=100, blank=True, null=True, verbose_name='원산지')
-    축종_부위 = models.CharField(max_length=100, blank=True, null=True, verbose_name='축종-부위')
-    원산지_축종 = models.CharField(max_length=100, blank=True, null=True, verbose_name='원산지')
-    등급 = models.CharField(max_length=50, blank=True, null=True, verbose_name='등급')
-    Box = models.IntegerField(blank=True, null=True, verbose_name='Box')
-    중량_Kg = models.FloatField(blank=True, null=True, verbose_name='중량(Kg)')
-    매출단가 = models.IntegerField(blank=True, null=True, verbose_name='매출단가')
-    매출금액 = models.BigIntegerField(verbose_name='매출금액')
-    매출이익 = models.BigIntegerField(blank=True, null=True, verbose_name='매출이익')
-    이익율 = models.FloatField(blank=True, null=True, verbose_name='이익율')
-    매입처 = models.CharField(max_length=200, blank=True, null=True, verbose_name='매입 처')
-    매입일자 = models.DateField(blank=True, null=True, verbose_name='매입일자')
-    재고보유일 = models.IntegerField(blank=True, null=True, verbose_name='재고보유일')
-    수입로컬 = models.CharField(max_length=20, blank=True, null=True, verbose_name='수입/로컬')
-    이관재고여부 = models.CharField(max_length=20, blank=True, null=True, verbose_name='이관재고 여부')
-    담당자 = models.CharField(max_length=100, blank=True, null=True, verbose_name='담당자')
-    매입단가 = models.IntegerField(blank=True, null=True, verbose_name='매입단가')
-    매입금액 = models.BigIntegerField(blank=True, null=True, verbose_name='매입금액')
-    지점명 = models.CharField(max_length=100, blank=True, null=True, verbose_name='지점명')
-    매출비고 = models.TextField(blank=True, null=True, verbose_name='매출비고')
-    매입비고 = models.TextField(blank=True, null=True, verbose_name='매입비고')
-    이력번호 = models.CharField(max_length=100, blank=True, null=True, verbose_name='이력번호')
-    BL번호 = models.CharField(max_length=100, blank=True, null=True, verbose_name='B/L번호(도체번호)')
-    
-    # 연결된 필드 (선택사항)
-    company_obj = models.ForeignKey(Company, on_delete=models.SET_NULL, null=True, blank=True, related_name='sales_data', verbose_name='연결된 회사')
+    매출일자 = models.DateField(verbose_name='매출일자', db_column='sale_date')
+    코드 = models.CharField(max_length=50, blank=True, null=True, verbose_name='코드', db_column='code')
+    거래처명 = models.CharField(max_length=200, verbose_name='거래처명', db_column='customer_name')
+    매출부서 = models.CharField(max_length=100, blank=True, null=True, verbose_name='매출부서', db_column='sales_dept')
+    매출담당자 = models.CharField(max_length=100, blank=True, null=True, verbose_name='매출담당자', db_column='sales_person')
+    유통형태 = models.CharField(max_length=100, blank=True, null=True, verbose_name='유통형태', db_column='distribution_type')
+    상품코드 = models.CharField(max_length=100, blank=True, null=True, verbose_name='상품코드', db_column='product_code')
+    상품명 = models.CharField(max_length=200, blank=True, null=True, verbose_name='상품명', db_column='product_name')
+    브랜드 = models.CharField(max_length=100, blank=True, null=True, verbose_name='브랜드', db_column='brand')
+    축종 = models.CharField(max_length=100, blank=True, null=True, verbose_name='축종', db_column='livestock_type')
+    부위 = models.CharField(max_length=100, blank=True, null=True, verbose_name='부위', db_column='cut_type')
+    원산지 = models.CharField(max_length=100, blank=True, null=True, verbose_name='원산지', db_column='origin')
+    축종_부위 = models.CharField(max_length=100, blank=True, null=True, verbose_name='축종-부위', db_column='livestock_cut')
+    원산지_축종 = models.CharField(max_length=100, blank=True, null=True, verbose_name='원산지', db_column='origin_livestock')
+    등급 = models.CharField(max_length=50, blank=True, null=True, verbose_name='등급', db_column='grade')
+    Box = models.IntegerField(blank=True, null=True, verbose_name='Box', db_column='box')
+    중량_Kg = models.FloatField(blank=True, null=True, verbose_name='중량(Kg)', db_column='WEIGHT_KG')
+    매출단가 = models.IntegerField(blank=True, null=True, verbose_name='매출단가', db_column='sale_unit_price')
+    매출금액 = models.BigIntegerField(verbose_name='매출금액', db_column='sale_amount')
+    매출이익 = models.BigIntegerField(blank=True, null=True, verbose_name='매출이익', db_column='sale_profit')
+    이익율 = models.FloatField(blank=True, null=True, verbose_name='이익율', db_column='profit_rate')
+    매입처 = models.CharField(max_length=200, blank=True, null=True, verbose_name='매입 처', db_column='purchase_source')
+    매입일자 = models.DateField(blank=True, null=True, verbose_name='매입일자', db_column='purchase_date')
+    재고보유일 = models.IntegerField(blank=True, null=True, verbose_name='재고보유일', db_column='inventory_days')
+    수입로컬 = models.CharField(max_length=20, blank=True, null=True, verbose_name='수입/로컬', db_column='import_local')
+    이관재고여부 = models.CharField(max_length=20, blank=True, null=True, verbose_name='이관재고 여부', db_column='transfer_inventory_yn')
+    담당자 = models.CharField(max_length=100, blank=True, null=True, verbose_name='담당자', db_column='manager')
+    매입단가 = models.IntegerField(blank=True, null=True, verbose_name='매입단가', db_column='purchase_unit_price')
+    매입금액 = models.BigIntegerField(blank=True, null=True, verbose_name='매입금액', db_column='purchase_amount')
+    지점명 = models.CharField(max_length=100, blank=True, null=True, verbose_name='지점명', db_column='branch_name')
+    매출비고 = models.TextField(blank=True, null=True, verbose_name='매출비고', db_column='sale_note')
+    매입비고 = models.TextField(blank=True, null=True, verbose_name='매입비고', db_column='purchase_note')
+    이력번호 = models.CharField(max_length=100, blank=True, null=True, verbose_name='이력번호', db_column='history_no')
+    BL번호 = models.CharField(max_length=100, blank=True, null=True, verbose_name='B/L번호(도체번호)', db_column='bl_number')
     
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='생성일시')
 

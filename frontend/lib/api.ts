@@ -5,18 +5,26 @@ const getApiBaseUrl = () => {
     const hostname = window.location.hostname;
     const port = window.location.port;
     
+    console.log('[API] Current hostname:', hostname, 'port:', port);
+    
     // localhost나 127.0.0.1인 경우
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
-      return 'http://127.0.0.1:8000/api';
+      const apiUrl = 'http://127.0.0.1:8000/api';
+      console.log('[API] Using development API URL:', apiUrl);
+      return apiUrl;
     }
     
     // 172.28.x.x 같은 내부 IP인 경우 같은 호스트의 8000 포트 사용
     if (hostname.startsWith('172.28.') || hostname.startsWith('192.168.')) {
-      return `http://${hostname}:8000/api`;
+      const apiUrl = `http://${hostname}:8000/api`;
+      console.log('[API] Using internal network API URL:', apiUrl);
+      return apiUrl;
     }
     
     // 그 외의 경우 운영 환경으로 간주
-    return 'http://192.168.99.37:8000/api';
+    const apiUrl = 'http://192.168.99.37:8000/api';
+    console.log('[API] Using production API URL:', apiUrl);
+    return apiUrl;
   }
   
   // 서버 사이드 렌더링 시 개발 환경으로 간주
@@ -83,6 +91,7 @@ export interface CompanyFilters {
   search?: string;
   customer_classification?: string;
   industry_name?: string;
+  ordering?: string;
 }
 
 export interface CompanyFinancialStatus {
@@ -129,24 +138,69 @@ async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<
   };
 
   const url = `${API_BASE_URL}${endpoint}`;
+  console.log('[API] Making request to:', url, 'Method:', method);
   try {
     const response = await fetch(url, config);
+    console.log('[API] Response status:', response.status, 'for', endpoint);
   
     if (!response.ok) {
-      console.error(`API 호출 실패: ${response.status} - ${endpoint}`);
-      console.error('Response:', response);
+      console.error(`[API] 호출 실패: ${response.status} - ${endpoint}`);
+      console.error('[API] Response:', response);
       
       // 응답 본문을 읽어서 더 자세한 오류 정보 제공
+      let errorData;
+      let errorText = '';
+      
       try {
-        const errorData = await response.json();
-        console.error('Error details:', errorData);
-        if (errorData && typeof errorData === 'object' && (errorData as any).error) {
-          throw new Error((errorData as any).error);
-        }
-        throw new Error(`API 호출 실패: ${response.status} - ${endpoint}\n${JSON.stringify(errorData, null, 2)}`);
+        // 먼저 텍스트로 읽어보기
+        errorText = await response.text();
+        console.error('[API] Raw error response:', errorText);
+        
+        // JSON 파싱 시도
+        errorData = JSON.parse(errorText);
+        console.error('[API] Parsed error details:', errorData);
       } catch (parseError) {
-        throw new Error(`API 호출 실패: ${response.status} - ${endpoint}`);
+        console.error('[API] JSON 파싱 실패, 원시 응답:', errorText);
+        console.error('[API] Parse error:', parseError);
       }
+      
+      // JWT 토큰 만료 처리
+      if (response.status === 401 && errorData && typeof errorData === 'object') {
+        const errorDetail = (errorData as any).detail || (errorData as any).error || '';
+        if (errorDetail.includes('Given token not valid for any token type') || 
+            errorDetail.includes('token_not_valid') ||
+            errorDetail.includes('Token is invalid or expired')) {
+          console.log('[API] JWT 토큰 만료 감지, 로그아웃 처리');
+          
+          // 토큰 정리
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('refresh_token');
+            localStorage.removeItem('user');
+            
+            // 사용자에게 알림
+            alert('로그인 세션이 만료되었습니다. 다시 로그인해주세요.');
+            
+            // 로그인 페이지로 리다이렉트
+            window.location.href = '/login';
+          }
+          throw new Error('로그인 세션이 만료되었습니다.');
+        }
+      }
+      
+      // 백엔드에서 error 필드를 보낸 경우, 해당 메시지만 사용
+      if (errorData && typeof errorData === 'object' && (errorData as any).error) {
+        throw new Error((errorData as any).error);
+      }
+      
+      // error 필드가 없는 경우, 기본 HTTP 상태 메시지 사용 
+      const statusMessage = response.status === 404 ? '리소스를 찾을 수 없습니다.' :
+                            response.status === 403 ? '접근 권한이 없습니다.' :
+                            response.status === 500 ? '서버 오류가 발생했습니다.' :
+                            response.status === 400 ? '요청이 잘못되었습니다.' :
+                            '알 수 없는 오류가 발생했습니다.';
+      
+      throw new Error(statusMessage);
     }
     
     // DELETE 요청의 경우 빈 응답이므로 JSON 파싱을 시도하지 않음
@@ -166,10 +220,19 @@ async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<
       console.error('JSON 파싱 오류:', parseError);
       throw new Error(`응답 파싱 실패: ${endpoint}`);
     }
-  } catch (networkError) {
-    console.error('네트워크 호출 오류:', networkError, '\
-요청 URL:', url, '\n옵션:', config);
-    throw new Error('Failed to fetch: 네트워크 또는 CORS 오류가 발생했습니다.');
+  } catch (networkError: any) {
+    console.error('[API] 네트워크 호출 오류:', networkError);
+    console.error('[API] 요청 URL:', url);
+    console.error('[API] 요청 옵션:', config);
+    
+    // 더 자세한 오류 메시지 제공
+    if (networkError instanceof TypeError && networkError.message.includes('fetch')) {
+      const errorMsg = `네트워크 오류: 백엔드 서버(${API_BASE_URL})에 연결할 수 없습니다. 서버가 실행 중인지 확인하세요.`;
+      console.error('[API]', errorMsg);
+      throw new Error(errorMsg);
+    }
+    
+    throw networkError;
   }
 }
 
@@ -255,6 +318,9 @@ export const companyApi = {
     }
     if (filters?.industry_name) {
       params.append('industry_name', filters.industry_name);
+    }
+    if (filters?.ordering) {
+      params.append('ordering', filters.ordering);
     }
     if (page) {
       params.append('page', page.toString());
@@ -441,19 +507,37 @@ export const companyApi = {
       
       console.log('응답 상태:', response.status);
       console.log('응답 OK:', response.ok);
+      console.log('응답 헤더:', Object.fromEntries(response.headers.entries()));
       
       if (!response.ok) {
-        const errorData = await response.json();
+        let errorData;
+        try {
+          const text = await response.text();
+          console.log('오류 응답 본문:', text);
+          errorData = text ? JSON.parse(text) : { error: `서버 오류 (${response.status})` };
+        } catch (parseError) {
+          console.error('오류 응답 파싱 실패:', parseError);
+          errorData = { error: `서버 오류 (${response.status}): 응답을 파싱할 수 없습니다.` };
+        }
         console.error('API 오류:', errorData);
-        throw new Error(errorData.error || '매출 데이터 업로드에 실패했습니다.');
+        throw new Error(errorData.error || `매출 데이터 업로드에 실패했습니다. (상태 코드: ${response.status})`);
       }
       
       const result = await response.json();
       console.log('성공 결과:', result);
       return result;
-    } catch (error) {
+    } catch (error: any) {
       console.error('API 호출 중 오류:', error);
-      throw error;
+      // 네트워크 오류인 경우 더 자세한 정보 제공
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        throw new Error(`네트워크 오류: 백엔드 서버(${API_BASE_URL})에 연결할 수 없습니다. 서버가 실행 중인지 확인하세요.`);
+      }
+      // 이미 Error 객체인 경우 그대로 throw
+      if (error instanceof Error) {
+        throw error;
+      }
+      // 그 외의 경우
+      throw new Error(`매출 데이터 업로드 중 오류가 발생했습니다: ${String(error)}`);
     }
   },
 }; 

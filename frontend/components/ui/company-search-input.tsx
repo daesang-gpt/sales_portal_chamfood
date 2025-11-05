@@ -19,6 +19,7 @@ interface CompanySearchInputProps {
   placeholder?: string
   className?: string
   disabled?: boolean
+  required?: boolean
 }
 
 export function CompanySearchInput({
@@ -27,7 +28,8 @@ export function CompanySearchInput({
   onChange,
   placeholder = "회사명을 입력하세요",
   className,
-  disabled = false
+  disabled = false,
+  required = false
 }: CompanySearchInputProps) {
   const [suggestions, setSuggestions] = useState<CompanySuggestion[]>([])
   const [isOpen, setIsOpen] = useState(false)
@@ -178,6 +180,7 @@ export function CompanySearchInput({
           placeholder={placeholder}
           className={cn("pr-10", className)}
           disabled={disabled}
+          required={required}
         />
         
         {/* 우측 아이콘들 */}

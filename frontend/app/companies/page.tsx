@@ -42,7 +42,7 @@ export default function CompaniesPage() {
       
       // 회사 목록과 통계를 병렬로 로드
       const [companiesData, statsData] = await Promise.all([
-        companyApi.getCompanies({ search: searchTerm }, page),
+        companyApi.getCompanies({ search: searchTerm, ordering: '-company_code' }, page),
         companyApi.getCompanyStats()
       ])
       
@@ -79,7 +79,7 @@ export default function CompaniesPage() {
       try {
         setLoading(true)
         setError(null)
-        const companiesData = await companyApi.getCompanies({ search: searchTerm }, currentPage)
+        const companiesData = await companyApi.getCompanies({ search: searchTerm, ordering: '-company_code' }, currentPage)
         setCompanies((companiesData as any).results)
         setTotalCount(companiesData.count)
         setTotalPages(Math.ceil(companiesData.count / 10))

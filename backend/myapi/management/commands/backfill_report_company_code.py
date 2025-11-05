@@ -22,7 +22,6 @@ class Command(BaseCommand):
         self.stdout.write(f'Target (missing company_code): {qs.count()} of {total_missing}')
 
         updated = 0
-        via_obj = 0
         via_lookup = 0
         ambiguous = 0
         not_found = 0
@@ -31,32 +30,43 @@ class Command(BaseCommand):
             for idx, report in enumerate(qs.iterator(), start=1):
                 resolved = None
 
-                # 1) Use company_obj if present
-                if report.company_obj:
-                    resolved = report.company_obj
-                    via_obj += 1
-
-                # 2) Lookup by name + city, then by name only
-                if resolved is None:
-                    name = (report.company_name or '').strip()
-                    city = (report.company_city_district or '').strip()
-                    candidates = []
-                    if name and city:
-                        candidates = list(Company.objects.filter(company_name=name, city_district=city))
-                    if not candidates and name:
-                        candidates = list(Company.objects.filter(company_name=name))
-                    if len(candidates) == 1:
-                        resolved = candidates[0]
-                        via_lookup += 1
-                    elif len(candidates) > 1:
-                        ambiguous += 1
+                # Lookup by name + city, then by name only
+                name = (report.company_name or '').strip()
+                city = (report.company_city_district or '').strip()
+                candidates = []
+                
+                if name and city:
+                    candidates = list(Company.objects.filter(company_name=name, city_district=city))
+                if not candidates and name:
+                    candidates = list(Company.objects.filter(company_name=name))
+                    
+                if len(candidates) == 1:
+                    resolved = candidates[0]
+                    via_lookup += 1
+                elif len(candidates) > 1:
+                    # 소재지로 좁히기 시도
+                    if city:
+                        city_narrow = [c for c in candidates if (c.city_district or '').strip() == city]
+                        if len(city_narrow) == 1:
+                            resolved = city_narrow[0]
+                            via_lookup += 1
+                        else:
+                            ambiguous += 1
                     else:
-                        not_found += 1
+                        ambiguous += 1
+                else:
+                    not_found += 1
 
                 if resolved and not dry_run:
-                    report.company_code = resolved  # to_field company_code
-                    report.save(update_fields=['company_code'])
-                    updated += 1
+                    try:
+                        # Oracle에서 FK 업데이트 시 company_code_id를 직접 설정
+                        # to_field='company_code'이므로 실제 FK 값은 company_code 문자열
+                        report.company_code_id = resolved.company_code
+                        report.save(update_fields=['company_code'])
+                        updated += 1
+                    except Exception as e:
+                        self.stdout.write(self.style.ERROR(f'오류 발생 (ID {report.id}): {e}'))
+                        not_found += 1
 
                 if idx % 200 == 0:
                     self.stdout.write(f'Processed {idx}... (updated={updated})')
@@ -66,7 +76,7 @@ class Command(BaseCommand):
 
         self.stdout.write('Done')
         self.stdout.write(f'- updated: {updated}')
-        self.stdout.write(f'- via_obj: {via_obj}, via_lookup: {via_lookup}')
+        self.stdout.write(f'- via_lookup: {via_lookup}')
         self.stdout.write(f'- ambiguous: {ambiguous}, not_found: {not_found}')
 
 

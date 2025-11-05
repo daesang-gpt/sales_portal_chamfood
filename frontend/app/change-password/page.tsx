@@ -90,6 +90,32 @@ export default function ChangePasswordPage() {
         }),
       });
       
+      // JWT 토큰 만료 처리
+      if (response.status === 401) {
+        try {
+          const errorData = await response.json();
+          const errorDetail = errorData.detail || errorData.error || '';
+          if (errorDetail.includes('Given token not valid for any token type') || 
+              errorDetail.includes('token_not_valid') ||
+              errorDetail.includes('Token is invalid or expired')) {
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('refresh_token');
+            localStorage.removeItem('user');
+            alert('로그인 세션이 만료되었습니다. 다시 로그인해주세요.');
+            router.push('/login');
+            return;
+          }
+        } catch {
+          // JSON 파싱 실패 시에도 401이면 토큰 만료로 간주
+          localStorage.removeItem('access_token');
+          localStorage.removeItem('refresh_token');
+          localStorage.removeItem('user');
+          alert('로그인 세션이 만료되었습니다. 다시 로그인해주세요.');
+          router.push('/login');
+          return;
+        }
+      }
+      
       const data: ChangePasswordResponse = await response.json();
       
       if (data.success) {

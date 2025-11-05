@@ -7,7 +7,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.db.models import Q, Max, Sum, Value
 from django.db.models.functions import Replace
 from django.utils import timezone
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, date
 from .models import Company, Report, User, CompanyFinancialStatus, SalesData
 from .serializers import CompanySerializer, ReportSerializer, UserSerializer, LoginSerializer, RegisterSerializer, CompanyFinancialStatusSerializer, SalesDataSerializer, ForgotPasswordSerializer, ChangePasswordSerializer
 from keybert import KeyBERT
@@ -30,6 +30,7 @@ from django.conf import settings
 import secrets
 import traceback
 import string
+from django.db import connection
 
 # 태그 후보 및 임베딩 캐싱
 TAG_CANDIDATES = None
@@ -65,6 +66,7 @@ class CompanyViewSet(viewsets.ModelViewSet):
         search = self.request.query_params.get('search', None)
         customer_classification = self.request.query_params.get('customer_classification', None)
         industry_name = self.request.query_params.get('industry_name', None)
+        ordering = self.request.query_params.get('ordering', '-company_code')
 
         if search:
             queryset = queryset.filter(
@@ -78,29 +80,326 @@ class CompanyViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(customer_classification=customer_classification)
         if industry_name:
             queryset = queryset.filter(industry_name__icontains=industry_name)
-        return queryset.order_by('company_name')
+        return queryset.order_by(ordering)
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
+        company_code = instance.company_code
+        
         # 연결된 영업일지(Report)가 있는지 확인
-        if instance.reports.exists():
-            return Response({'error': '이 회사에 연결된 영업일지가 존재하여 삭제할 수 없습니다.'}, status=status.HTTP_400_BAD_REQUEST, content_type='application/json')
-        return super().destroy(request, *args, **kwargs)
+        print(f"\n[DEBUG] Company 삭제 확인 시작 - company_code: {repr(company_code)} (타입: {type(company_code).__name__})")
+        
+        try:
+            from django.db import connection
+            
+            # 디버깅: 스키마 정보 다시 확인
+            with connection.cursor() as cursor:
+                try:
+                    cursor.execute("""
+                        SELECT COLUMN_NAME, DATA_TYPE, DATA_LENGTH, DATA_PRECISION, DATA_SCALE, NULLABLE 
+                        FROM USER_TAB_COLUMNS 
+                        WHERE TABLE_NAME = 'REPORTS' AND COLUMN_NAME = 'COMPANY_CODE'
+                    """)
+                    column_info = cursor.fetchone()
+                    print(f"[DEBUG] REPORTS.COMPANY_CODE 컬럼 정보: {column_info}")
+                        
+                    cursor.execute("""
+                        SELECT COLUMN_NAME, DATA_TYPE, DATA_LENGTH, DATA_PRECISION, DATA_SCALE, NULLABLE 
+                        FROM USER_TAB_COLUMNS 
+                        WHERE TABLE_NAME = 'COMPANIES' AND COLUMN_NAME = 'COMPANY_CODE'
+                    """)
+                    column_info = cursor.fetchone()
+                    print(f"[DEBUG] COMPANIES.COMPANY_CODE 컬럼 정보: {column_info}")
+                        
+                except Exception as schema_error:
+                    print(f"[DEBUG] 스키마 정보 확인 실패: {schema_error}")
+
+            # 먼저 REPORTS 테이블의 실제 COMPANY_CODE 값들을 확인
+            with connection.cursor() as cursor:
+                try:
+                    cursor.execute("SELECT DISTINCT COMPANY_CODE, TO_CHAR(COMPANY_CODE) FROM REPORTS WHERE ROWNUM <= 10")
+                    sample_data = cursor.fetchall()
+                    print(f"[DEBUG] REPORTS 테이블 샘플 데이터:")
+                    for row in sample_data:
+                        print(f"  원본값: {row[0]} (타입: {type(row[0]).__name__}), TO_CHAR: {row[1]}")
+                except Exception as sample_error:
+                    print(f"[DEBUG] 샘플 데이터 확인 실패: {sample_error}")
+                
+                # 특정 company_code와 관련된 모든 가능한 값들 확인
+                try:
+                    # C를 제거한 숫자 부분
+                    numeric_part = company_code.lstrip('C').lstrip('0') or '0'  # 앞자리 0 제거, 빈 문자열이면 '0'
+                    padded_numeric = company_code.lstrip('C')  # 앞자리 0 유지
+                    
+                    print(f"[DEBUG] 검색할 값들:")
+                    print(f"  company_code: {company_code}")
+                    print(f"  numeric_part: {numeric_part}")
+                    print(f"  padded_numeric: {padded_numeric}")
+                    
+                    # 다양한 형태로 저장된 값들 확인
+                    test_queries = [
+                        f"SELECT COUNT(*) FROM REPORTS WHERE TO_CHAR(COMPANY_CODE) = '{company_code}'",
+                        f"SELECT COUNT(*) FROM REPORTS WHERE TO_CHAR(COMPANY_CODE) = '{numeric_part}'",
+                        f"SELECT COUNT(*) FROM REPORTS WHERE TO_CHAR(COMPANY_CODE) = '{padded_numeric}'",
+                        f"SELECT COUNT(*) FROM REPORTS WHERE COMPANY_CODE = {numeric_part}",
+                        f"SELECT COUNT(*) FROM REPORTS WHERE LPAD(TO_CHAR(COMPANY_CODE), 7, '0') = '{padded_numeric}'",
+                        f"SELECT COUNT(*) FROM REPORTS WHERE 'C' || LPAD(TO_CHAR(COMPANY_CODE), 7, '0') = '{company_code}'",
+                    ]
+                    
+                    for i, test_sql in enumerate(test_queries):
+                        try:
+                            cursor.execute(test_sql)
+                            test_result = cursor.fetchone()[0]
+                            print(f"[DEBUG] 테스트 {i+1}: {test_result}개 - {test_sql}")
+                            if test_result > 0:
+                                print(f"[FOUND] 매칭되는 방식 발견!")
+                                break
+                        except Exception as test_error:
+                            print(f"[DEBUG] 테스트 {i+1} 실패: {test_error}")
+                            
+                except Exception as test_error:
+                    print(f"[DEBUG] 테스트 쿼리 실행 실패: {test_error}")
+
+            # 여러 방식으로 쿼리 시도 (더 많은 패턴 추가)
+            numeric_part = company_code.lstrip('C').lstrip('0') or '0'
+            padded_numeric = company_code.lstrip('C')
+            
+            methods_to_try = [
+                ("TO_CHAR 변환 - 전체", "SELECT COUNT(*) FROM REPORTS WHERE TO_CHAR(COMPANY_CODE) = :company_code", {'company_code': company_code}),
+                ("TO_CHAR 변환 - 숫자만", "SELECT COUNT(*) FROM REPORTS WHERE TO_CHAR(COMPANY_CODE) = :numeric", {'numeric': numeric_part}),
+                ("TO_CHAR 변환 - 패딩숫자", "SELECT COUNT(*) FROM REPORTS WHERE TO_CHAR(COMPANY_CODE) = :padded", {'padded': padded_numeric}),
+                ("직접 숫자 비교", "SELECT COUNT(*) FROM REPORTS WHERE COMPANY_CODE = :numeric", {'numeric': int(numeric_part)}),
+                ("LPAD 7자리", "SELECT COUNT(*) FROM REPORTS WHERE LPAD(TO_CHAR(COMPANY_CODE), 7, '0') = :padded", {'padded': padded_numeric}),
+                ("C + LPAD 조합", "SELECT COUNT(*) FROM REPORTS WHERE 'C' || LPAD(TO_CHAR(COMPANY_CODE), 7, '0') = :company_code", {'company_code': company_code}),
+                ("LIKE 패턴", "SELECT COUNT(*) FROM REPORTS WHERE TO_CHAR(COMPANY_CODE) LIKE :pattern", {'pattern': f'%{numeric_part}'}),
+            ]
+            
+            count = 0
+            for method_name, sql, params in methods_to_try:
+                try:
+                    print(f"[DEBUG] {method_name} 시도:")
+                    print(f"  SQL: {sql}")
+                    print(f"  매개변수: {params}")
+                    
+                    with connection.cursor() as cursor:
+                        cursor.execute(sql, params)
+                        count = cursor.fetchone()[0]
+                        print(f"  성공! 결과: {count}")
+                        break
+                        
+                except Exception as method_error:
+                    print(f"  실패: {method_error}")
+                    continue
+            else:
+                # 모든 방법이 실패한 경우
+                print("[ERROR] 모든 쿼리 방법이 실패했습니다")
+                raise Exception("모든 쿼리 방법이 실패했습니다")
+                
+            print(f"[DEBUG] 최종 확인 결과: {count}개의 연관된 Report 발견 (회사코드 기준)")
+                
+            if count > 0:
+                return Response(
+                    {'error': f'이 회사에 연결된 영업일지가 {count}개 존재하여 삭제할 수 없습니다.'}, 
+                    status=status.HTTP_400_BAD_REQUEST, 
+                    content_type='application/json'
+                )
+                    
+        except Exception as e:
+            print(f"[ERROR] 회사 삭제 전 확인 중 오류:")
+            print(f"  오류 타입: {type(e).__name__}")
+            print(f"  오류 메시지: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            
+            # 쿼리 실패 시 안전을 위해 삭제 차단
+            return Response(
+                {'error': f'회사 삭제 전 확인 중 오류 발생: {str(e)}'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+                content_type='application/json'
+            )
+        
+        # 안전하게 회사 삭제 - Django ORM 대신 우리가 만든 perform_destroy 직접 호출
+        try:
+            print(f"[DEBUG] Django ORM 대신 perform_destroy 직접 호출")
+            self.perform_destroy(instance)
+            print(f"[DEBUG] perform_destroy 성공!")
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except Exception as e:
+            print(f"[ERROR] perform_destroy 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            return Response(
+                {'error': f'회사 삭제 중 오류 발생: {str(e)}'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+                content_type='application/json'
+            )
+    
+    def perform_destroy(self, instance):
+        """Oracle에서 안전한 삭제를 위한 표준 처리"""
+        from django.db import transaction, connection
+        
+        company_code = instance.company_code
+        
+        print(f"\n[DEBUG] perform_destroy 시작 - company_code: {repr(company_code)} (타입: {type(company_code).__name__})")
+        
+        with transaction.atomic():
+            # 각 테이블별로 스키마 정보 확인 후 삭제
+            operations = [
+                {
+                    "name": "CompanyFinancialStatus",
+                    "table": "COMPANY_FINANCIAL_STATUS", 
+                    "operation": "DELETE",
+                    "methods": [
+                        ("TO_CHAR 변환", "DELETE FROM COMPANY_FINANCIAL_STATUS WHERE TO_CHAR(COMPANY_CODE) = :company_code", {'company_code': company_code}),
+                        ("문자열을 숫자로 변환", "DELETE FROM COMPANY_FINANCIAL_STATUS WHERE COMPANY_CODE = TO_NUMBER(:company_code)", {'company_code': company_code.lstrip('C')}),
+                        ("직접 비교", "DELETE FROM COMPANY_FINANCIAL_STATUS WHERE COMPANY_CODE = :company_code", {'company_code': company_code}),
+                    ]
+                },
+                {
+                    "name": "Reports",
+                    "table": "REPORTS", 
+                    "operation": "UPDATE",
+                    "methods": [
+                        ("TO_CHAR 변환", "UPDATE REPORTS SET COMPANY_CODE = NULL WHERE TO_CHAR(COMPANY_CODE) = :company_code", {'company_code': company_code}),
+                        ("문자열을 숫자로 변환", "UPDATE REPORTS SET COMPANY_CODE = NULL WHERE COMPANY_CODE = TO_NUMBER(:company_code)", {'company_code': company_code.lstrip('C')}),
+                        ("LPAD 패딩", "UPDATE REPORTS SET COMPANY_CODE = NULL WHERE LPAD(TO_CHAR(COMPANY_CODE), 8, '0') = :company_code", {'company_code': company_code}),
+                    ]
+                },
+                {
+                    "name": "Companies",
+                    "table": "COMPANIES", 
+                    "operation": "DELETE",
+                    "methods": [
+                        ("직접 비교 (NVARCHAR2)", "DELETE FROM COMPANIES WHERE COMPANY_CODE = :company_code", {'company_code': company_code}),
+                        ("Positional", "DELETE FROM COMPANIES WHERE COMPANY_CODE = %s", [company_code]),
+                    ]
+                }
+            ]
+
+            for operation in operations:
+                operation_name = operation["name"]
+                table_name = operation["table"]
+                methods_to_try = operation["methods"]
+                
+                print(f"\n[DEBUG] {operation_name} 처리 시작 (테이블: {table_name})")
+                
+                # 테이블의 COMPANY_CODE 컬럼 정보 확인
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute(f"""
+                            SELECT COLUMN_NAME, DATA_TYPE, DATA_LENGTH, DATA_PRECISION, DATA_SCALE, NULLABLE 
+                            FROM USER_TAB_COLUMNS 
+                            WHERE TABLE_NAME = '{table_name}' AND COLUMN_NAME = 'COMPANY_CODE'
+                        """)
+                        column_info = cursor.fetchone()
+                        if column_info:
+                            print(f"[DEBUG] {table_name}.COMPANY_CODE 컬럼 정보: {column_info}")
+                        else:
+                            print(f"[DEBUG] {table_name}.COMPANY_CODE 컬럼을 찾을 수 없음")
+                except Exception as schema_error:
+                    print(f"[DEBUG] {table_name} 스키마 정보 확인 실패: {schema_error}")
+                
+                # 여러 방식으로 쿼리 시도
+                success = False
+                for method_name, sql, params in methods_to_try:
+                    try:
+                        print(f"[DEBUG] {method_name} 시도:")
+                        print(f"  SQL: {sql}")
+                        print(f"  매개변수: {params}")
+                        
+                        with connection.cursor() as cursor:
+                            cursor.execute(sql, params)
+                            affected_rows = cursor.rowcount
+                            print(f"  성공! 영향받은 행 수: {affected_rows}")
+                            success = True
+                            break
+                            
+                    except Exception as method_error:
+                        print(f"  실패: {method_error}")
+                        continue
+                
+                if not success:
+                    error_msg = f"{operation_name} 처리 중 모든 쿼리 방법이 실패했습니다"
+                    print(f"[ERROR] {error_msg}")
+                    raise Exception(error_msg)
+                else:
+                    print(f"[SUCCESS] {operation_name} 처리 완료")
+            
+            print(f"[SUCCESS] Company 삭제 완료: {company_code}")
+
+    def update(self, request, *args, **kwargs):
+        """회사 정보 수정 시 재무 정보도 함께 처리"""
+        instance = self.get_object()
+        partial = kwargs.pop('partial', False)
+        
+        # request.data를 dict로 복사 (QueryDict는 수정 불가)
+        data = dict(request.data)
+        
+        # 재무 정보 추출 (별도 처리)
+        financial_statuses = data.pop('financial_statuses', None)
+        
+        # 회사 정보 업데이트
+        serializer = self.get_serializer(instance, data=data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        
+        # 재무 정보 처리
+        if financial_statuses is not None:
+            from django.db import transaction
+            from datetime import datetime
+            
+            with transaction.atomic():
+                # 기존 재무 정보 삭제 (선택적으로)
+                # 또는 업데이트/생성만 수행
+                for financial_data in financial_statuses:
+                    if not financial_data.get('fiscal_year'):
+                        continue
+                    
+                    try:
+                        # 날짜 파싱
+                        fiscal_year_str = financial_data['fiscal_year']
+                        if isinstance(fiscal_year_str, str):
+                            # YYYY-MM-DD 형식 또는 YYYY 형식 처리
+                            if len(fiscal_year_str) == 4:
+                                fiscal_year = datetime.strptime(fiscal_year_str + '-01-01', '%Y-%m-%d').date()
+                            else:
+                                fiscal_year = datetime.strptime(fiscal_year_str.split('T')[0], '%Y-%m-%d').date()
+                        else:
+                            fiscal_year = fiscal_year_str
+                        
+                        # 재무 정보 생성 또는 업데이트
+                        CompanyFinancialStatus.objects.update_or_create(
+                            company=instance,
+                            fiscal_year=fiscal_year,
+                            defaults={
+                                'total_assets': int(financial_data.get('total_assets', 0) or 0),
+                                'capital': int(financial_data.get('capital', 0) or 0),
+                                'total_equity': int(financial_data.get('total_equity', 0) or 0),
+                                'revenue': int(financial_data.get('revenue', 0) or 0),
+                                'operating_income': int(financial_data.get('operating_income', 0) or 0),
+                                'net_income': int(financial_data.get('net_income', 0) or 0),
+                            }
+                        )
+                    except Exception as e:
+                        # 재무 정보 처리 오류는 무시하거나 로그만 남김
+                        print(f"재무 정보 처리 오류: {e}")
+                        pass
+        
+        if getattr(instance, '_prefetched_objects_cache', None):
+            instance._prefetched_objects_cache = {}
+        
+        return Response(serializer.data)
 
 class ReportViewSet(viewsets.ModelViewSet):
     queryset = Report.objects.all()  # type: ignore[attr-defined]
     serializer_class = ReportSerializer
     permission_classes = [IsAuthenticated]
 
-    def dispatch(self, request, *args, **kwargs):
-        """요청이 들어오는지 확인하기 위한 dispatch 오버라이드"""
-        print(f"\n[ReportViewSet.dispatch] 요청 도달: {request.method} {request.path}")
-        print(f"[ReportViewSet.dispatch] action: {kwargs.get('action', 'unknown')}")
-        return super().dispatch(request, *args, **kwargs)
-
     def get_queryset(self):
         # 모든 사용자(관리자, 일반 사용자)가 전체 영업일지를 볼 수 있도록 수정
-        queryset = Report.objects.all()
+        # Oracle에서 company_code FK는 문자열 타입이므로 select_related 사용 시 문제 발생 가능
+        # author만 select_related로 미리 로드 (company_code는 serializer에서 필요 시 로드)
+        queryset = Report.objects.select_related('author').all()
         
         # 방문일자 기준으로 내림차순 정렬 (최신순)
         return queryset.order_by('-visitDate')
@@ -108,15 +407,6 @@ class ReportViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         # 현재 사용자를 author로 설정하고 작성자명, 팀명 저장
         user = self.request.user
-        company_obj = serializer.validated_data.get('company_obj')
-        
-        print("=" * 80)
-        print("[perform_create] 시작")
-        print(f"[perform_create] user: {user} (id: {user.id}, type: {type(user.id)})")
-        print(f"[perform_create] company_obj: {company_obj} (type: {type(company_obj)})")
-        if company_obj:
-            print(f"[perform_create] company_obj.company_code: {company_obj.company_code} (type: {type(company_obj.company_code)})")
-            print(f"[perform_create] company_obj.pk: {company_obj.pk} (type: {type(company_obj.pk)})")
         
         # Oracle 호환성을 위해 author는 ID로 명시적으로 전달
         save_kwargs = {
@@ -125,102 +415,12 @@ class ReportViewSet(viewsets.ModelViewSet):
             'author_department': user.department if user.department else None,
         }
         
-        # 회사 정보 저장
-        if company_obj:
-            save_kwargs['company_name'] = company_obj.company_name or None
-            save_kwargs['company_city_district'] = company_obj.city_district or None
-            # Oracle에서 문자열 PK ForeignKey 처리
-            # company_obj는 일반 ForeignKey이므로 company_obj_id로 문자열 PK 전달
-            save_kwargs['company_obj_id'] = company_obj.company_code
-            
-            # company_code는 to_field='company_code'로 설정된 ForeignKey
-            # save_kwargs에 문자열 값으로 직접 전달 (validated_data를 수정하는 것보다 이게 더 확실함)
-            save_kwargs['company_code'] = company_obj.company_code
-            print(f"[perform_create] company_code를 save_kwargs에 문자열로 추가: {company_obj.company_code} (타입: {type(company_obj.company_code)})")
-            
-            # validated_data에서 Company 객체 제거 (save_kwargs가 우선순위가 높으므로)
-            if 'company_code' in serializer.validated_data:
-                old_value = serializer.validated_data.pop('company_code')
-                print(f"[perform_create] validated_data에서 company_code 제거됨 (기존 값: {old_value}, 타입: {type(old_value)})")
-            
-            # company_obj도 제거 (company_obj_id로 대체)
-            if 'company_obj' in serializer.validated_data:
-                old_company_obj = serializer.validated_data.pop('company_obj')
-                print(f"[perform_create] validated_data에서 company_obj 제거됨 (company_obj_id로 대체)")
-        else:
-            # company_obj가 None인 경우 명시적으로 설정
-            save_kwargs['company_obj_id'] = None
-            save_kwargs['company_code'] = None
-            if 'company_code' in serializer.validated_data:
-                serializer.validated_data.pop('company_code')
-            if 'company_obj' in serializer.validated_data:
-                serializer.validated_data.pop('company_obj')
-        
-        # 상세 디버깅: 모든 필드의 값과 타입 출력
-        print("\n[perform_create] save_kwargs 상세:")
-        for key, value in save_kwargs.items():
-            value_type = type(value)
-            value_repr = repr(value)
-            if hasattr(value, '__class__'):
-                value_class_name = value.__class__.__name__
-            else:
-                value_class_name = str(value_type)
-            
-            # 값이 너무 길면 잘라서 표시
-            if isinstance(value, str) and len(value) > 100:
-                value_repr = value[:100] + "..."
-            
-            print(f"  {key}:")
-            print(f"    값: {value_repr}")
-            print(f"    타입: {value_type} ({value_class_name})")
-            if hasattr(value, 'pk'):
-                print(f"    pk: {value.pk} (type: {type(value.pk)})")
-            if hasattr(value, 'id'):
-                print(f"    id: {value.id} (type: {type(value.id)})")
-        
-        print(f"\n[perform_create] validated_data keys: {list(serializer.validated_data.keys())}")
-        print(f"[perform_create] validated_data 상세:")
-        for key, value in serializer.validated_data.items():
-            print(f"  {key}: {value} (type: {type(value)})")
-        
-        print("\n[perform_create] serializer.instance:", serializer.instance)
-        print("=" * 80)
-        
-        try:
-            print("[perform_create] serializer.save() 호출 시작...")
-            result = serializer.save(**save_kwargs)
-            print(f"[perform_create] serializer.save() 성공! result: {result}")
-            print(f"[perform_create] result.id: {getattr(result, 'id', 'N/A')}")
-            print("=" * 80)
-            return result
-        except Exception as save_error:
-            print("\n" + "=" * 80)
-            print("[perform_create] 저장 중 오류 발생!")
-            print(f"오류 타입: {type(save_error).__name__}")
-            print(f"오류 메시지: {str(save_error)}")
-            print("\n상세 스택 트레이스:")
-            import traceback
-            traceback.print_exc()
-            print("=" * 80)
-            raise
+        serializer.save(**save_kwargs)
     
     def create(self, request, *args, **kwargs):
         """영업일지 생성 시 회사 데이터 이용 로직"""
-        # 즉시 로그 출력 (요청이 도달했는지 확인)
-        print("\n" + "=" * 80)
-        print("=" * 80)
-        print("[ReportViewSet.create] 메서드 호출됨!")
-        print("=" * 80)
-        print(f"[ReportViewSet.create] request.method: {request.method}")
-        print(f"[ReportViewSet.create] request.path: {request.path}")
-        print(f"[ReportViewSet.create] request.user: {request.user}")
-        print(f"[ReportViewSet.create] request.data type: {type(request.data)}")
-        print(f"[ReportViewSet.create] request.data: {request.data}")
-        print("=" * 80)
-        
         try:
             data = dict(request.data)
-            print(f"[ReportViewSet.create] data 변환 완료: {list(data.keys())}")
             
             # visitDate 날짜 변환 (Oracle 호환성을 위해 명시적으로 변환)
             if 'visitDate' in data:
@@ -242,29 +442,20 @@ class ReportViewSet(viewsets.ModelViewSet):
             # 회사 관련 데이터 추출
             company_location = data.get('location', '')  # 신규 회사 소재지
             company_products = data.get('products', '')
-            company_name_input = data.get('company_name', '')  # 회사명 입력 (선택사항, 신규 회사 생성 시 사용)
+            company_name_input = data.get('company', '')  # 프론트엔드에서 'company' 필드로 회사명 전송
             
             company_obj = None
             
             # 회사 참조가 있는 경우 (Company PK는 company_code 문자열)
-            if data.get('company_obj'):
-                try:
-                    company_code = data['company_obj']
-                    # 문자열로 변환 (Oracle 호환성)
-                    if not isinstance(company_code, str):
-                        company_code = str(company_code)
-                    company_obj = Company.objects.get(company_code=company_code)
-                    # 회사 데이터에서 사용품목을 가져와서 데이터에 설정
-                    data['products'] = company_obj.products or company_products
-                except Company.DoesNotExist:
-                    print(f"회사를 찾을 수 없습니다: company_code={data['company_obj']}")
-                    return Response({'error': '선택하신 회사를 찾을 수 없습니다.'}, status=status.HTTP_400_BAD_REQUEST)
-            elif company_name_input:
+            # company_obj는 프론트엔드 호환성을 위해 받지만, 내부적으로는 company_code로 변환
+            company_code_value = data.get('company_obj') or data.get('company_code')
+            
+            # company_name_input이 있으면 우선적으로 처리 (새로운 회사명 입력)
+            if company_name_input:
                 # 기존 회사명으로 검색
                 existing_company = Company.objects.filter(company_name=company_name_input).first()
                 if existing_company:
                     company_obj = existing_company
-                    data['company_obj'] = existing_company.company_code
                     # 회사 데이터에서 사용품목을 가져와서 데이터에 설정
                     data['products'] = existing_company.products or company_products
                 else:
@@ -277,133 +468,179 @@ class ReportViewSet(viewsets.ModelViewSet):
                     else:
                         next_num = 1
                     new_code = f'C{next_num:07d}'
+                    
+                    # location 정보를 city_district로 설정
                     new_company = Company.objects.create(
                         company_code=new_code,
                         company_name=company_name_input,
                         customer_classification='신규',
                         products=company_products,
+                        city_district=company_location,  # location을 city_district로 저장
                         employee_name=request.user.name if request.user else None
                     )
                     company_obj = new_company
-                    data['company_obj'] = new_company.company_code
                     data['products'] = company_products
-            
-            # 회사 데이터 업데이트 (사용자가 사용품목을 입력한 경우)
-            if company_obj and company_products:
-                company_obj.products = company_products
-                company_obj.save()
+            elif company_code_value:
+                # 기존 회사 코드로 검색
+                try:
+                    company_code = company_code_value
+                    # 문자열로 변환 (Oracle 호환성)
+                    if not isinstance(company_code, str):
+                        company_code = str(company_code)
+                    company_obj = Company.objects.get(company_code=company_code)
+                    # 회사 데이터에서 사용품목을 가져와서 데이터에 설정
+                    data['products'] = company_obj.products or company_products
+                except Company.DoesNotExist:
+                    return Response({'error': '선택하신 회사를 찾을 수 없습니다.'}, status=status.HTTP_400_BAD_REQUEST)
             
             # 회사 정보를 데이터에 추가 (저장용)
             if company_obj:
                 data['company_name'] = company_obj.company_name
-                data['company_city_district'] = company_obj.city_district
+                data['company_city_district'] = company_obj.city_district  # 원본 값 먼저 설정
+                # PrimaryKeyRelatedField에는 primary key 값(company_code)을 전달
+                data['company_code_fk'] = company_obj.company_code
             
-            # read_only 필드 제거 (perform_create에서 설정됨)
+            # read_only 필드 및 Report 모델에 없는 필드 제거
             data.pop('author', None)
             data.pop('author_name', None)
             data.pop('author_department', None)
             data.pop('team', None)
-            data.pop('location', None)  # location은 Report 모델에 없음
+            data.pop('location', None)  # location은 Report 모델에 없음 (이미 회사의 city_district로 사용됨)
+            data.pop('company_obj', None)  # company_obj는 company_code_fk로 변환됨
+            data.pop('company', None)  # company(회사명)는 company_name으로 저장됨
+            data.pop('company_code', None)  # company_code는 읽기 전용 필드이므로 제거
             
             # 빈 문자열을 None으로 변환 (Oracle 호환성)
-            for key in ['sales_stage', 'products', 'tags', 'company_city_district']:
+            # tags 필드는 null=False이므로 빈 문자열 그대로 유지
+            for key in ['sales_stage', 'products', 'company_city_district']:
                 if key in data and data[key] == '':
                     data[key] = None
             
-            # 상세 디버깅: 데이터 출력
-            print("\n" + "=" * 80)
-            print("[create] 최종 데이터 처리")
-            print("=" * 80)
-            print(f"[create] data dictionary keys: {list(data.keys())}")
-            print("\n[create] data 상세:")
-            for key, value in data.items():
-                value_type = type(value)
-                if isinstance(value, str) and len(value) > 100:
-                    value_repr = value[:100] + "..."
-                else:
-                    value_repr = repr(value)
-                print(f"  {key}: {value_repr} (type: {value_type})")
+            # company_city_district가 None이고 location 정보가 있으면 location 사용
+            if data.get('company_city_district') is None and company_location:
+                data['company_city_district'] = company_location
+                # 기존 회사 정보도 업데이트
+                if company_obj and not company_obj.city_district:
+                    company_obj.city_district = company_location
+                    company_obj.save(update_fields=['city_district'])
             
-            print(f"\n[create] company_obj: {company_obj} (type: {type(company_obj)})")
-            if company_obj:
-                print(f"[create] company_obj.company_code: {company_obj.company_code} (type: {type(company_obj.company_code)})")
-                print(f"[create] company_obj.pk: {company_obj.pk} (type: {type(company_obj.pk)})")
-            
-            print(f"[create] request.user: {request.user} (id: {request.user.id}, type: {type(request.user.id)})")
-            print("=" * 80 + "\n")
+            # tags는 빈 문자열을 그대로 유지 (null=False이므로)
+            if 'tags' in data and data['tags'] == '':
+                data['tags'] = ''  # 빈 문자열 유지
             
             # serializer를 직접 생성하여 처리
-            print("[create] Serializer 생성 및 검증 시작...")
             serializer = self.get_serializer(data=data)
-            print("[create] Serializer.is_valid() 호출...")
             serializer.is_valid(raise_exception=True)
-            print("[create] Serializer 검증 완료!")
-            print(f"[create] validated_data: {serializer.validated_data}")
-            print("[create] perform_create 호출...")
             self.perform_create(serializer)
             headers = self.get_success_headers(serializer.data)
             return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
             
         except Exception as e:
-            print("\n" + "=" * 80)
-            print("[ReportViewSet.create] 예외 발생!")
-            print("=" * 80)
-            print(f"[ReportViewSet.create] 예외 타입: {type(e).__name__}")
-            print(f"[ReportViewSet.create] 예외 메시지: {str(e)}")
-            print("\n[ReportViewSet.create] 상세 스택 트레이스:")
-            import traceback
-            traceback.print_exc()
-            print("=" * 80 + "\n")
             return Response({'error': f'영업일지 생성 중 오류가 발생했습니다: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def update(self, request, *args, **kwargs):
         """영업일지 수정 시 회사 데이터 이용 로직"""
         instance = self.get_object()
-        data = request.data.copy()
+        partial = kwargs.pop('partial', False)
         
-        # 회사 관련 데이터 추출
-        company_obj = None
-        if data.get('company_obj') or instance.company_obj:
-            company_obj = instance.company_obj
-            if data.get('company_obj'):
-                try:
-                    # company_obj가 company_code인지 id인지 확인
-                    company_code_or_id = data['company_obj']
-                    try:
-                        company_obj = Company.objects.get(company_code=company_code_or_id)
-                    except Company.DoesNotExist:
-                        try:
-                            company_obj = Company.objects.get(id=company_code_or_id)
-                        except Company.DoesNotExist:
-                            pass
-                except:
-                    pass
+        print(f"[ReportViewSet.update] ========== 영업일지 수정 디버그 시작 ==========")
+        print(f"[ReportViewSet.update] 영업일지 ID: {instance.id}")
+        print(f"[ReportViewSet.update] 기존 company_code: {instance.company_code}")
+        print(f"[ReportViewSet.update] 기존 company_name: {instance.company_name}")
+        print(f"[ReportViewSet.update] 원본 request.data: {dict(request.data)}")
         
-        # 회사 정보 업데이트 (저장용)
-        if company_obj:
-            data['company_name'] = company_obj.company_name
-            data['company_city_district'] = company_obj.city_district
+        # 요청 데이터를 dict로 복사
+        data = dict(request.data)
         
-        # 회사 데이터가 있으면 해당 데이터로 설정 (사용자가 입력하지 않았을 때만)
-        if company_obj and not data.get('products') and not instance.products:
-            data['products'] = company_obj.products
+        # 회사 관련 데이터 추출 및 검증
+        company_code_value = data.get('company_obj') or data.get('company_code')
+        print(f"[ReportViewSet.update] 추출된 company_code_value: {company_code_value} (타입: {type(company_code_value)})")
+        if company_code_value:
+            try:
+                company_code = company_code_value
+                if not isinstance(company_code, str):
+                    company_code = str(company_code)
+                company_obj = Company.objects.get(company_code=company_code)
+                
+                # 회사 정보를 data에 추가
+                data['company_name'] = company_obj.company_name
+                data['company_city_district'] = company_obj.city_district
+                data['company_code'] = company_obj.company_code
+                # company_obj 필드는 제거 (company_code로 대체)
+                data.pop('company_obj', None)
+                
+                # 회사 데이터가 있으면 해당 데이터로 설정 (사용자가 입력하지 않았을 때만)
+                if not data.get('products') and not instance.products:
+                    data['products'] = company_obj.products
+            except Company.DoesNotExist:
+                # 존재하지 않는 회사 코드인 경우 명확한 에러 메시지 반환
+                return Response({
+                    'error': f'회사코드 "{company_code}"가 존재하지 않습니다.',
+                    'company_code': company_code
+                }, status=status.HTTP_400_BAD_REQUEST)
+            except Exception as e:
+                # 기타 예외 처리
+                import traceback
+                print(f"회사 정보 조회 중 오류: {e}")
+                print(traceback.format_exc())
+                return Response({
+                    'error': f'회사 정보 조회 중 오류가 발생했습니다: {str(e)}',
+                    'company_code': company_code_value
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        elif instance.company_code:
+            # instance의 company_code FK를 통해 Company 객체 가져오기
+            company_obj = instance.company_code
+            # 기존 회사 정보가 있으면 data에 추가
+            if not data.get('company_code'):
+                data['company_name'] = company_obj.company_name
+                data['company_city_district'] = company_obj.city_district
+                data['company_code'] = company_obj.company_code
+            # company_obj 필드는 제거 (company_code로 대체)
+            data.pop('company_obj', None)
         
-        request.data._mutable = True
-        request.data.clear()
-        request.data.update(data)
-        request.data._mutable = False
+        print(f"[ReportViewSet.update] 최종 data: {data}")
         
-        return super().update(request, *args, **kwargs)
+        # 표준 DRF 방식으로 serializer 생성 및 검증
+        serializer = self.get_serializer(instance, data=data, partial=partial)
+        print(f"[ReportViewSet.update] Serializer 검증 결과: {serializer.is_valid()}")
+        serializer.is_valid(raise_exception=True)
+        
+        print(f"[ReportViewSet.update] perform_update 호출 전")
+        self.perform_update(serializer)
+        print(f"[ReportViewSet.update] perform_update 호출 후")
+        
+        # 최신 데이터 다시 가져오기
+        instance.refresh_from_db()
+        print(f"[ReportViewSet.update] 최종 결과 - company_code: {instance.company_code}")
+        print(f"[ReportViewSet.update] 최종 결과 - company_name: {instance.company_name}")
+        print(f"[ReportViewSet.update] ========== 영업일지 수정 디버그 끝 ==========")
+        
+        if getattr(instance, '_prefetched_objects_cache', None):
+            instance._prefetched_objects_cache = {}
+        
+        return Response(serializer.data)
 
     def perform_update(self, serializer):
         # 업데이트 시에도 author, author_name, author_department는 변경하지 않음
-        # 회사 정보는 업데이트 가능 (company_obj가 변경되면 company_name, company_city_district도 업데이트)
-        company_obj = serializer.validated_data.get('company_obj', serializer.instance.company_obj)
+        # 회사 정보는 serializer의 update 메서드에서 처리되므로 여기서는 추가 처리 불필요
+        # 단, validated_data에 company_code가 문자열로 남아있을 경우를 대비한 안전장치
+        company_code_value = serializer.validated_data.get('company_code')
         save_kwargs = {}
         
-        if company_obj:
-            save_kwargs['company_name'] = company_obj.company_name
-            save_kwargs['company_city_district'] = company_obj.city_district
+        # company_code는 이미 serializer의 update 메서드에서 처리되었으므로
+        # 여기서는 company_name과 company_city_district만 확인
+        # (company_code가 validated_data에 남아있고 문자열인 경우에만 처리)
+        if company_code_value and isinstance(company_code_value, str):
+            try:
+                company = Company.objects.get(company_code=company_code_value)
+                # 이미 serializer에서 설정되었을 수 있으므로, 없을 때만 설정
+                if 'company_name' not in serializer.validated_data:
+                    save_kwargs['company_name'] = company.company_name
+                if 'company_city_district' not in serializer.validated_data:
+                    save_kwargs['company_city_district'] = company.city_district
+            except Company.DoesNotExist:
+                # 이미 serializer에서 에러 처리가 되었을 것이므로 여기서는 무시
+                pass
         
         serializer.save(**save_kwargs)
 
@@ -419,48 +656,65 @@ class ReportViewSet(viewsets.ModelViewSet):
                 'details': str(e)
             }, status=status.HTTP_400_BAD_REQUEST)
 
-@api_view(['POST'])
+@api_view(['GET', 'POST', 'OPTIONS'])
 @permission_classes([AllowAny])
 def login_view(request):
-    serializer = LoginSerializer(data=request.data)
-    if serializer.is_valid():
-        id = serializer.validated_data['id']
-        password = serializer.validated_data['password']
-        
-        user = authenticate(request, username=id, password=password)
-        
-        if user is not None:
-            refresh = RefreshToken.for_user(user)
-            
-            # 최초 로그인 여부 확인
-            requires_password_change = not getattr(user, 'is_password_changed', False)
-            
+    try:
+        # GET 또는 OPTIONS 요청 처리 (CORS preflight)
+        if request.method == 'GET' or request.method == 'OPTIONS':
             return Response({
-                'success': True,
-                'message': '로그인 성공',
-                'access_token': str(refresh.access_token),
-                'refresh_token': str(refresh),
-                'requires_password_change': requires_password_change,
-                'user': {
-                    'id': user.id,
-                    'name': user.name,
-                    'department': user.department,
-                    'employee_number': user.employee_number,
-                    'role': user.role,
-                    'is_password_changed': getattr(user, 'is_password_changed', False)
-                }
-            }, status=status.HTTP_200_OK)
+                'success': False,
+                'message': 'POST 요청만 지원됩니다.'
+            }, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+        
+        # POST 요청 처리
+        serializer = LoginSerializer(data=request.data)
+        if serializer.is_valid():
+            id = serializer.validated_data['id']
+            password = serializer.validated_data['password']
+            
+            user = authenticate(request, username=id, password=password)
+            
+            if user is not None:
+                refresh = RefreshToken.for_user(user)
+                
+                # 최초 로그인 여부 확인
+                requires_password_change = not getattr(user, 'is_password_changed', False)
+                
+                return Response({
+                    'success': True,
+                    'message': '로그인 성공',
+                    'access_token': str(refresh.access_token),
+                    'refresh_token': str(refresh),
+                    'requires_password_change': requires_password_change,
+                    'user': {
+                        'id': user.id,
+                        'name': user.name,
+                        'department': user.department,
+                        'employee_number': user.employee_number,
+                        'role': user.role,
+                        'is_password_changed': getattr(user, 'is_password_changed', False)
+                    }
+                }, status=status.HTTP_200_OK)
+            else:
+                return Response({
+                    'success': False,
+                    'message': '아이디 또는 비밀번호가 올바르지 않습니다.'
+                }, status=status.HTTP_401_UNAUTHORIZED)
         else:
             return Response({
                 'success': False,
-                'message': '아이디 또는 비밀번호가 올바르지 않습니다.'
-            }, status=status.HTTP_401_UNAUTHORIZED)
-    else:
+                'message': '입력 데이터가 올바르지 않습니다.',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        logging.error(f"Login view error: {str(e)}")
+        logging.error(traceback.format_exc())
         return Response({
             'success': False,
-            'message': '입력 데이터가 올바르지 않습니다.',
-            'errors': serializer.errors
-        }, status=status.HTTP_400_BAD_REQUEST)
+            'message': '서버 오류가 발생했습니다.',
+            'error': str(e) if settings.DEBUG else None
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -1160,8 +1414,9 @@ class SalesReportListView(ListAPIView):
     def get_queryset(self):
         try:
             # 모든 사용자(관리자, 일반 사용자)가 전체 영업일지를 볼 수 있도록 수정
-            # 기본 쿼리셋 사용 (select_related는 나중에 최적화)
-            queryset = Report.objects.all()
+            # Oracle에서 company_code FK는 문자열 타입이므로 select_related 사용 시 문제 발생 가능
+            # author만 select_related로 미리 로드 (company_code는 serializer에서 필요 시 로드)
+            queryset = Report.objects.select_related('author').all()
             
             # 검색/필터/정렬
             search = self.request.query_params.get('search', '').strip()
@@ -1176,31 +1431,20 @@ class SalesReportListView(ListAPIView):
                 try:
                     company = Company.objects.get(company_code=company_id)
                     # Company 객체가 있으면 이를 사용하여 필터링
-                    # company_obj와 company_code FK 모두 Company 객체로 비교
-                    queryset = queryset.filter(
-                        Q(company_obj=company) |
-                        Q(company_code=company) |
-                        Q(company_name=company.company_name)
-                    )
-                    print(f"[SalesReportListView] companyId 필터링 (Company 객체 사용): {company_id}")
+                    # 동일한 company_code를 가진 영업일지만 필터링 (company_name 제외)
+                    queryset = queryset.filter(company_code=company)
+                    print(f"[SalesReportListView] companyId 필터링 (Company 객체 사용, company_code만): {company_id}")
                 except Company.DoesNotExist:
-                    # Company가 없으면 기존 방식으로 필터링 (문자열 비교)
-                    queryset = queryset.filter(
-                        Q(company_obj__company_code=company_id) |
-                        Q(company_code=company_id) |
-                        Q(company_name=company_id)
-                    )
-                    print(f"[SalesReportListView] companyId 필터링 (문자열 비교): {company_id}")
+                    # Company가 없으면 문자열 company_code로만 필터링 (company_name 제외)
+                    queryset = queryset.filter(company_code=company_id)
+                    print(f"[SalesReportListView] companyId 필터링 (문자열, company_code만): {company_id}")
                 except Exception as e:
-                    # 기타 예외 발생 시 로깅하고 기존 방식으로 필터링 시도
+                    # 기타 예외 발생 시 로깅하고 안전한 필터링으로 폴백
                     print(f"[SalesReportListView] companyId 필터링 중 예외 발생: {str(e)}")
                     import traceback
                     traceback.print_exc()
-                    # 안전한 필터링으로 폴백
-                    queryset = queryset.filter(
-                        Q(company_obj__company_code=company_id) |
-                        Q(company_name=company_id)
-                    )
+                    # 안전한 필터링으로 폴백 (company_code만)
+                    queryset = queryset.filter(company_code=company_id)
             if search:
                 queryset = queryset.filter(
                     Q(company_name__icontains=search) |
@@ -1242,8 +1486,6 @@ class CompanyFinancialStatusViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        from django.db import connection
-        
         # 회사 코드로 필터링 (company_code 또는 company_code_sap)
         company_code = self.request.query_params.get('company__company_code', None)
         company_code_sap = self.request.query_params.get('company__company_code_sap', None)
@@ -1252,68 +1494,17 @@ class CompanyFinancialStatusViewSet(viewsets.ReadOnlyModelViewSet):
         if not company_code and not company_code_sap:
             return models.CompanyFinancialStatus.objects.all()
         
-        try:
-            # company_code_sap가 주어졌으면 company_code로 변환
-            if company_code_sap:
-                with connection.cursor() as cursor:
-                    try:
-                        cx_cursor = cursor.cursor
-                        cx_cursor.execute(
-                            "SELECT COMPANY_CODE FROM COMPANIES WHERE COMPANY_CODE_SAP = :1",
-                            [company_code_sap]
-                        )
-                        result = cx_cursor.fetchone()
-                        if not result:
-                            return models.CompanyFinancialStatus.objects.none()
-                        company_code = result[0]
-                    except Exception:
-                        cursor.execute(
-                            "SELECT COMPANY_CODE FROM COMPANIES WHERE COMPANY_CODE_SAP = %s",
-                            [company_code_sap]
-                        )
-                        result = cursor.fetchone()
-                        if not result:
-                            return models.CompanyFinancialStatus.objects.none()
-                        company_code = result[0]
-            
-            # company_code를 사용하여 재무정보 조회
-            # company_financial_status.company_id는 COMPANIES.ID (숫자)를 참조하므로
-            # JOIN을 사용하여 필터링
-            if company_code:
-                with connection.cursor() as cursor:
-                    try:
-                        cx_cursor = cursor.cursor
-                        # company_id는 숫자형이고 COMPANIES.ID를 참조
-                        cx_cursor.execute("""
-                            SELECT CFS.ID 
-                            FROM COMPANY_FINANCIAL_STATUS CFS
-                            INNER JOIN COMPANIES C ON CFS.COMPANY_ID = C.ID
-                            WHERE C.COMPANY_CODE = :1
-                        """, [company_code])
-                        ids = [row[0] for row in cx_cursor.fetchall()]
-                    except Exception:
-                        # Django 방식으로 시도
-                        cursor.execute("""
-                            SELECT CFS.ID 
-                            FROM COMPANY_FINANCIAL_STATUS CFS
-                            INNER JOIN COMPANIES C ON CFS.COMPANY_ID = C.ID
-                            WHERE C.COMPANY_CODE = %s
-                        """, [company_code])
-                        ids = [row[0] for row in cursor.fetchall()]
-                
-                if ids:
-                    return models.CompanyFinancialStatus.objects.filter(id__in=ids)
-                else:
-                    return models.CompanyFinancialStatus.objects.none()
-            else:
-                return models.CompanyFinancialStatus.objects.none()
-                
-        except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"CompanyFinancialStatus 필터링 중 오류: {e}", exc_info=True)
-            # 오류 발생 시 빈 queryset 반환
-            return models.CompanyFinancialStatus.objects.none()
+        queryset = models.CompanyFinancialStatus.objects.all()
+        
+        # company_code로 필터링
+        if company_code:
+            queryset = queryset.filter(company__company_code=company_code)
+        
+        # company_code_sap로 필터링
+        if company_code_sap:
+            queryset = queryset.filter(company__company_code_sap=company_code_sap)
+        
+        return queryset
     
     def list(self, request, *args, **kwargs):
         try:
@@ -1346,7 +1537,7 @@ class SalesDataViewSet(viewsets.ModelViewSet):
                 매출담당자_norm=Replace('매출담당자', Value(' '), Value(''))
             ).filter(
                 Q(매출담당자_norm__icontains=normalized_name) |
-                Q(company_obj__employee_name__icontains=normalized_name)
+                Q(company_obj__employee_name__icontains=normalized_name)  # SalesData 모델의 company_obj는 유지됨
             )
         
         # 날짜 필터링
@@ -1372,9 +1563,9 @@ def download_reports_csv(request):
         # 모든 영업일지 데이터 조회
         # Oracle 타입 변환 오류를 방지하기 위해 필요한 필드만 가져오기
         reports = Report.objects.only(
-            'id', 'author_department', 'visitDate', 'company_name', 'company_obj_id', 'type', 
+            'id', 'author_department', 'visitDate', 'company_name', 'company_code', 'type', 
             'products', 'content', 'tags', 'createdAt', 'author_id'
-        ).select_related('author').iterator(chunk_size=100)
+        ).select_related('author', 'company_code').iterator(chunk_size=100)
         
         # CSV 응답 생성
         response = HttpResponse(content_type='text/csv; charset=utf-8-sig')
@@ -1441,16 +1632,14 @@ def download_reports_csv(request):
                 content = safe_str(report.content, '')
                 tags = safe_str(report.tags, '')
                 
-                # company_obj_id 처리 (Foreign Key이지만 Company의 PK가 company_code(문자열))
+                # company_code FK 처리 (Company의 PK가 company_code(문자열))
                 company_code = ''
                 try:
-                    # 직접 company_obj_id 속성 접근 (문자열 값)
-                    if hasattr(report, 'company_obj_id'):
-                        company_obj_id_val = report.company_obj_id
-                        if company_obj_id_val is not None:
-                            company_code = safe_str(company_obj_id_val, '')
+                    # company_code FK를 통해 접근
+                    if report.company_code:
+                        company_code = safe_str(report.company_code.company_code, '')
                 except Exception as e:
-                    logging.warning(f'Report ID {report_id}: company_obj_id 접근 오류 - {e}')
+                    logging.warning(f'Report ID {report_id}: company_code 접근 오류 - {e}')
                 
                 # 날짜 필드 처리 (문자열로 변환)
                 visit_date = ''
@@ -1727,7 +1916,7 @@ def upload_reports_csv(request):
                     'author_name': author_name,
                     'author_department': author_department,
                     'visitDate': visit_date,
-                    'company_obj': company_obj,
+                    'company_code': company_obj.company_code if company_obj else None,
                     'company_name': company_name,
                     'company_city_district': company_city_district,
                     'sales_stage': sales_stage,
@@ -1901,11 +2090,30 @@ def upload_sales_data_csv(request):
         
         # 파일 확장자 확인
         file_extension = csv_file.name.lower().split('.')[-1]
-        if file_extension not in ['csv', 'xlsx']:
-            return Response({'error': 'CSV 또는 XLSX 파일만 업로드 가능합니다.'}, status=status.HTTP_400_BAD_REQUEST)
+        if file_extension not in ['csv', 'xlsx', 'tsv']:
+            return Response({'error': 'CSV, TSV 또는 XLSX 파일만 업로드 가능합니다.'}, status=status.HTTP_400_BAD_REQUEST)
         
-        # 파일 읽기 (CSV 또는 XLSX)
-        if file_extension == 'csv':
+        # 파일 읽기 (CSV, TSV 또는 XLSX)
+        if file_extension == 'tsv':
+            # TSV 파일 읽기
+            csv_file.seek(0)  # 파일 포인터를 처음으로
+            try:
+                df = pd.read_csv(csv_file, sep='\t', encoding='utf-8', keep_default_na=False, na_values=[''])
+                # 각 행을 dictionary로 변환
+                csv_reader = []
+                for _, row in df.iterrows():
+                    # NaN 값을 빈 문자열로 변환하고, 숫자 필드는 안전하게 처리
+                    dict_row = {}
+                    for col in df.columns:
+                        val = row[col]
+                        if pd.isna(val) or (isinstance(val, str) and val.lower() in ['nan', 'none', 'null']):
+                            dict_row[col] = ''
+                        else:
+                            dict_row[col] = str(val) if val is not None else ''
+                    csv_reader.append(dict_row)
+            except Exception as e:
+                return Response({'error': f'TSV 파일 읽기 오류: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+        elif file_extension == 'csv':
             csv_data = csv_file.read().decode('utf-8')
             # 두 번 이상 순회가 필요하므로 리스트로 변환
             csv_reader = [dict(row) for row in csv.DictReader(csv_data.splitlines())]
@@ -1927,6 +2135,15 @@ def upload_sales_data_csv(request):
         created_count = 0
         updated_count = 0
         errors = []
+        skipped_count = 0
+        skipped_reasons = {
+            'no_customer_name': 0,
+            'no_sale_date': 0,
+            'no_sale_amount': 0,
+            'invalid_sale_date': 0,
+            'invalid_sale_amount': 0,
+            'exception': 0
+        }
         
         # 덮어쓰기 모드: 파일에 포함된 연-월 단위로 기존 데이터 삭제
         try:
@@ -1949,64 +2166,118 @@ def upload_sales_data_csv(request):
         except Exception as e:
             print(f"[덮어쓰기] 기존 데이터 삭제 중 오류: {e}")
         
+        total_rows = len(csv_reader)
+        print(f"[업로드] 총 읽은 행 수: {total_rows}")
+        
         for row_num, row in enumerate(csv_reader, start=2):  # 헤더가 1행이므로 2부터 시작
             try:
-                # 거래처명이 없는 경우 건너뛰기
-                if not row.get('거래처명', '').strip():
-                    continue
+                # 원본 행 데이터 저장 (디버깅용)
+                original_map = dict(row)
                 
-                # 필수 필드 검증
-                if not row.get('매출일자', '').strip():
-                    errors.append(f"{row_num}행: 매출일자가 필요합니다.")
-                    continue
+                # 거래처명 처리 (없으면 기본값 사용)
+                거래처명 = row.get('거래처명', '').strip()
+                if not 거래처명:
+                    거래처명 = f"미지정거래처_{row_num}"
+                    skipped_reasons['no_customer_name'] += 1
                 
-                if not row.get('매출금액', '').strip():
-                    errors.append(f"{row_num}행: 매출금액이 필요합니다.")
-                    continue
+                # 매출일자 파싱 (필수 필드, 없으면 오늘 날짜 사용)
+                매출일자 = None
+                if row.get('매출일자', '').strip():
+                    try:
+                        매출일자 = pd.to_datetime(row['매출일자']).date()
+                    except:
+                        try:
+                            # 다양한 날짜 형식 시도
+                            매출일자 = pd.to_datetime(row['매출일자'], errors='coerce').date()
+                            if pd.isna(매출일자) or 매출일자 is None:
+                                skipped_reasons['invalid_sale_date'] += 1
+                                errors.append(f"{row_num}행: 매출일자 형식이 올바르지 않아 오늘 날짜로 처리합니다. ({row.get('매출일자', '')})")
+                                매출일자 = date.today()
+                        except:
+                            skipped_reasons['invalid_sale_date'] += 1
+                            errors.append(f"{row_num}행: 매출일자 형식이 올바르지 않아 오늘 날짜로 처리합니다. ({row.get('매출일자', '')})")
+                            매출일자 = date.today()
+                else:
+                    skipped_reasons['no_sale_date'] += 1
+                    errors.append(f"{row_num}행: 매출일자가 없어 오늘 날짜로 처리합니다.")
+                    매출일자 = date.today()
                 
-                # 매출일자 파싱
-                try:
-                    매출일자 = pd.to_datetime(row['매출일자']).date()
-                except:
-                    errors.append(f"{row_num}행: 매출일자 형식이 올바르지 않습니다.")
-                    continue
-                
-                # 매출금액 파싱 (쉼표 제거 후 정수로 변환)
-                try:
-                    매출금액_str = str(row['매출금액']).replace(',', '').replace(' ', '')
-                    매출금액 = int(float(매출금액_str)) if 매출금액_str else 0
-                except:
-                    errors.append(f"{row_num}행: 매출금액 형식이 올바르지 않습니다.")
-                    continue
+                # 매출금액 파싱 (필수 필드, 없으면 0으로 처리)
+                매출금액 = 0
+                매출금액_raw = row.get('매출금액', '')
+                # pandas NaN 체크
+                if 매출금액_raw and not pd.isna(매출금액_raw) and str(매출금액_raw).strip():
+                    try:
+                        매출금액_str = str(매출금액_raw).replace(',', '').replace(' ', '').strip()
+                        # NaN 문자열 체크
+                        if 매출금액_str.lower() not in ['nan', 'none', '', 'null', 'nat'] and 매출금액_str:
+                            매출금액_float = float(매출금액_str)
+                            # NaN, Infinity 체크
+                            if not pd.isna(매출금액_float) and not np.isnan(매출금액_float) and not np.isinf(매출금액_float):
+                                매출금액 = int(매출금액_float)
+                            else:
+                                raise ValueError("매출금액이 NaN 또는 Infinity입니다")
+                    except Exception as e:
+                        skipped_reasons['invalid_sale_amount'] += 1
+                        errors.append(f"{row_num}행: 매출금액 형식이 올바르지 않습니다. ({row.get('매출금액', '')}) - {str(e)}")
+                        # 오류가 있어도 0으로 처리하고 계속 진행
+                        매출금액 = 0
+                else:
+                    skipped_reasons['no_sale_amount'] += 1
+                    errors.append(f"{row_num}행: 매출금액이 없어 0으로 처리합니다.")
+                    매출금액 = 0
                 # 추가 수치 파싱: 매출이익, 매입금액, 매출단가, 매입단가, 이익율
                 def parse_int_safe(val):
                     try:
-                        if val is None:
+                        # pandas NaN, numpy nan, None 등 먼저 체크
+                        if val is None or pd.isna(val) or str(val).strip() == '':
                             return None
-                        s = str(val).replace(',', '').replace(' ', '')
+                        s = str(val).replace(',', '').replace(' ', '').strip()
+                        # NaN, nan, None 등 처리
+                        if s.lower() in ['nan', 'none', '', 'null', 'none', 'nat']:
+                            return None
                         if s == '':
                             return None
-                        return int(float(s))
+                        # 숫자 변환 시도
+                        result = int(float(s))
+                        # 변환 후에도 NaN 체크 (float('nan') -> int 변환 시 오류 가능)
+                        if pd.isna(result) or np.isnan(result):
+                            return None
+                        return result
+                    except (ValueError, TypeError, OverflowError):
+                        return None
                     except Exception:
                         return None
 
                 def parse_float_safe(val):
                     try:
-                        if val is None:
+                        # pandas NaN, numpy nan, None 등 먼저 체크
+                        if val is None or pd.isna(val) or str(val).strip() == '':
                             return None
-                        s = str(val).replace('%', '').replace(' ', '')
+                        s = str(val).replace('%', '').replace(',', '').replace(' ', '').strip()
+                        # NaN, nan, None 등 처리
+                        if s.lower() in ['nan', 'none', '', 'null', 'none', 'nat']:
+                            return None
                         if s == '':
                             return None
-                        return float(s)
+                        # 숫자 변환 시도
+                        result = float(s)
+                        # 변환 후에도 NaN 체크
+                        if pd.isna(result) or np.isnan(result) or np.isinf(result):
+                            return None
+                        return result
+                    except (ValueError, TypeError, OverflowError):
+                        return None
                     except Exception:
                         return None
 
+                # 모든 숫자 필드 파싱 및 검증
                 매출이익_val = parse_int_safe(row.get('매출이익'))
                 매입금액_val = parse_int_safe(row.get('매입금액'))
                 매출단가_val = parse_int_safe(row.get('매출단가'))
                 매입단가_val = parse_int_safe(row.get('매입단가'))
                 이익율_val = parse_float_safe(row.get('이익율'))
-
+                
                 # 매출이익이 없고 매입금액이 있으면 계산: 매출금액 - 매입금액
                 if 매출이익_val is None and 매입금액_val is not None:
                     매출이익_val = 매출금액 - 매입금액_val
@@ -2018,87 +2289,812 @@ def upload_sales_data_csv(request):
                     except Exception:
                         이익율_val = None
                 
-                # 회사 연결 시도
-                company_obj = None
-                거래처명 = row['거래처명'].strip()
-                try:
-                    # 거래처명으로 회사 찾기
-                    company_obj = Company.objects.filter(
-                        Q(company_name__icontains=거래처명) |
-                        Q(company_code__contains=거래처명)
-                    ).first()
-                except:
-                    pass
-                
                 # Box 파싱 (있는 경우만)
                 Box = None
-                if row.get('Box', '').strip():
+                box_val = row.get('Box', '')
+                if box_val and not pd.isna(box_val) and str(box_val).strip():
                     try:
-                        Box = int(row['Box'])
+                        box_str = str(box_val).replace(',', '').replace(' ', '').strip()
+                        # NaN, nan, None 등 처리
+                        if box_str.lower() not in ['nan', 'none', '', 'null', 'nat'] and box_str:
+                            box_result = int(float(box_str))
+                            # NaN 체크
+                            if not pd.isna(box_result) and not np.isnan(box_result):
+                                Box = box_result
                     except:
-                        pass
+                        Box = None
                 
                 # 중량 파싱 (있는 경우만)
                 중량_Kg = None
-                if row.get('중량(Kg)', '').strip():
+                weight_val = row.get('중량(Kg)', '')
+                if weight_val and not pd.isna(weight_val) and str(weight_val).strip():
                     try:
-                        중량_Kg = float(row['중량(Kg)'])
+                        weight_str = str(weight_val).replace(',', '').replace(' ', '').strip()
+                        # NaN, nan, None 등 처리
+                        if weight_str.lower() not in ['nan', 'none', '', 'null', 'nat'] and weight_str:
+                            weight_result = float(weight_str)
+                            # NaN, Infinity 체크
+                            if not pd.isna(weight_result) and not np.isnan(weight_result) and not np.isinf(weight_result):
+                                중량_Kg = weight_result
+                    except:
+                        중량_Kg = None
+                
+                # 매입일자 파싱 (있는 경우만)
+                매입일자 = None
+                if row.get('매입일자', '').strip():
+                    try:
+                        매입일자 = pd.to_datetime(row['매입일자']).date()
                     except:
                         pass
                 
-                # 각 행을 항상 개별 매출로 저장 (중복 병합 금지)
-                SalesData.objects.create(
-                    매출일자=매출일자,
-                    코드=row.get('코드', '').strip() or None,
-                    거래처명=거래처명,
-                    매출부서=row.get('매출부서', '').strip() or None,
-                    매출담당자=row.get('매출담당자', '').strip() or None,
-                    유통형태=row.get('유통형태', '').strip() or None,
-                    상품코드=row.get('상품코드', '').strip() or None,
-                    상품명=row.get('상품명', '').strip() or None,
-                    브랜드=row.get('브랜드', '').strip() or None,
-                    축종=row.get('축종', '').strip() or None,
-                    부위=row.get('부위', '').strip() or None,
-                    원산지=row.get('원산지', '').strip() or None,
-                    축종_부위=row.get('축종-부위', '').strip() or None,
-                    원산지_축종=row.get('원산지', '').strip() or None,
-                    등급=row.get('등급', '').strip() or None,
-                    Box=Box,
-                    중량_Kg=중량_Kg,
-                    매출단가=매출단가_val,
-                    매출금액=매출금액,
-                    매출이익=매출이익_val,
-                    이익율=이익율_val,
-                    매입처=row.get('매입 처', '').strip() or None,
-                    매입일자=None,   # 필요시 별도 파싱
-                    재고보유일=None, # 필요시 별도 파싱
-                    수입로컬=row.get('수입/로컬', '').strip() or None,
-                    이관재고여부=row.get('이관재고 여부', '').strip() or None,
-                    담당자=row.get('담당자', '').strip() or None,
-                    매입단가=매입단가_val,
-                    매입금액=매입금액_val,
-                    지점명=row.get('지점명', '').strip() or None,
-                    매출비고=row.get('매출비고', '').strip() or None,
-                    매입비고=row.get('매입비고', '').strip() or None,
-                    이력번호=row.get('이력번호', '').strip() or None,
-                    BL번호=row.get('B/L번호(도체번호)', '').strip() or None,
-                    company_obj=company_obj,
-                )
+                # 재고보유일 파싱 (있는 경우만)
+                재고보유일 = None
+                재고보유일_val = row.get('재고보유일', '')
+                if 재고보유일_val and not pd.isna(재고보유일_val):
+                    재고보유일_str = str(재고보유일_val).strip().replace(',', '').replace(' ', '')
+                    if 재고보유일_str and 재고보유일_str.lower() not in ['nan', 'none', 'null', 'nat']:
+                        try:
+                            재고보유일_float = float(재고보유일_str)
+                            if not pd.isna(재고보유일_float) and not np.isnan(재고보유일_float):
+                                재고보유일 = int(재고보유일_float)
+                        except Exception:
+                            재고보유일 = None
+                
+                # 타입 최종 검증 및 정리 (모든 파싱 완료 후)
+                # NaN 값 체크 및 None 변환
+                if 매출이익_val is not None:
+                    if pd.isna(매출이익_val) or np.isnan(매출이익_val) or not isinstance(매출이익_val, (int, float)):
+                        try:
+                            if pd.isna(매출이익_val) or np.isnan(매출이익_val):
+                                매출이익_val = None
+                            elif isinstance(매출이익_val, (float, int)):
+                                매출이익_val = int(매출이익_val) if not pd.isna(매출이익_val) else None
+                            else:
+                                매출이익_val = None
+                        except Exception:
+                            매출이익_val = None
 
-                created_count += 1
+                if 매입금액_val is not None:
+                    if pd.isna(매입금액_val) or np.isnan(매입금액_val) or not isinstance(매입금액_val, (int, float)):
+                        try:
+                            if pd.isna(매입금액_val) or np.isnan(매입금액_val):
+                                매입금액_val = None
+                            elif isinstance(매입금액_val, (float, int)):
+                                매입금액_val = int(매입금액_val) if not pd.isna(매입금액_val) else None
+                            else:
+                                매입금액_val = None
+                        except Exception:
+                            매입금액_val = None
+
+                if 매출단가_val is not None:
+                    if pd.isna(매출단가_val) or np.isnan(매출단가_val) or not isinstance(매출단가_val, (int, float)):
+                        try:
+                            if pd.isna(매출단가_val) or np.isnan(매출단가_val):
+                                매출단가_val = None
+                            elif isinstance(매출단가_val, (float, int)):
+                                매출단가_val = int(매출단가_val) if not pd.isna(매출단가_val) else None
+                            else:
+                                매출단가_val = None
+                        except Exception:
+                            매출단가_val = None
+
+                if 매입단가_val is not None:
+                    if pd.isna(매입단가_val) or np.isnan(매입단가_val) or not isinstance(매입단가_val, (int, float)):
+                        try:
+                            if pd.isna(매입단가_val) or np.isnan(매입단가_val):
+                                매입단가_val = None
+                            elif isinstance(매입단가_val, (float, int)):
+                                매입단가_val = int(매입단가_val) if not pd.isna(매입단가_val) else None
+                            else:
+                                매입단가_val = None
+                        except Exception:
+                            매입단가_val = None
+
+                if 이익율_val is not None:
+                    if pd.isna(이익율_val) or np.isnan(이익율_val) or np.isinf(이익율_val) or not isinstance(이익율_val, (float, int)):
+                        try:
+                            if pd.isna(이익율_val) or np.isnan(이익율_val) or np.isinf(이익율_val):
+                                이익율_val = None
+                            elif isinstance(이익율_val, (float, int)):
+                                이익율_val = float(이익율_val) if not (pd.isna(이익율_val) or np.isnan(이익율_val) or np.isinf(이익율_val)) else None
+                            else:
+                                이익율_val = None
+                        except Exception:
+                            이익율_val = None
+
+                if Box is not None:
+                    if pd.isna(Box) or np.isnan(Box) or not isinstance(Box, (int, float)):
+                        try:
+                            if pd.isna(Box) or np.isnan(Box):
+                                Box = None
+                            elif isinstance(Box, (float, int)):
+                                Box = int(Box) if not pd.isna(Box) else None
+                            else:
+                                Box = None
+                        except Exception:
+                            Box = None
+
+                if 중량_Kg is not None:
+                    if pd.isna(중량_Kg) or np.isnan(중량_Kg) or np.isinf(중량_Kg) or not isinstance(중량_Kg, (float, int)):
+                        try:
+                            if pd.isna(중량_Kg) or np.isnan(중량_Kg) or np.isinf(중량_Kg):
+                                중량_Kg = None
+                            elif isinstance(중량_Kg, (float, int)):
+                                중량_Kg = float(중량_Kg) if not (pd.isna(중량_Kg) or np.isnan(중량_Kg) or np.isinf(중량_Kg)) else None
+                            else:
+                                중량_Kg = None
+                        except Exception:
+                            중량_Kg = None
+
+                if 재고보유일 is not None:
+                    if pd.isna(재고보유일) or np.isnan(재고보유일) or not isinstance(재고보유일, (int, float)):
+                        try:
+                            if pd.isna(재고보유일) or np.isnan(재고보유일):
+                                재고보유일 = None
+                            elif isinstance(재고보유일, (float, int)):
+                                재고보유일 = int(재고보유일) if not pd.isna(재고보유일) else None
+                            else:
+                                재고보유일 = None
+                        except Exception:
+                            재고보유일 = None
+
+                # 매출금액은 필수 필드이므로 0으로 기본값 설정
+                if not isinstance(매출금액, int) or pd.isna(매출금액) or np.isnan(매출금액):
+                    try:
+                        if pd.isna(매출금액) or np.isnan(매출금액):
+                            매출금액 = 0
+                        else:
+                            매출금액 = int(매출금액) if 매출금액 else 0
+                    except Exception:
+                        매출금액 = 0
+                
+                # 저장 직전 최종 NaN 체크 및 값 정리 함수 정의
+                def safe_int_value(val):
+                    """정수 값 안전하게 정리 (NaN 체크 포함)"""
+                    if val is None:
+                        return None
+                    try:
+                        # pandas/numpy NaN 체크 (문자열 변환 전에 체크)
+                        try:
+                            if pd.isna(val):
+                                return None
+                        except (TypeError, ValueError):
+                            pass
+                        try:
+                            if isinstance(val, (float, int)) and np.isnan(val):
+                                return None
+                        except (TypeError, ValueError):
+                            pass
+                        
+                        # 문자열인 경우 숫자로 변환 시도
+                        if isinstance(val, str):
+                            val = val.strip().replace(',', '').replace(' ', '')
+                            if val.lower() in ['nan', 'none', '', 'null', 'nat', 'none']:
+                                return None
+                            val = float(val)
+                        
+                        # 숫자 타입으로 변환
+                        if isinstance(val, (int, float)):
+                            result = int(val)
+                            # 변환 후 NaN 체크
+                            try:
+                                if pd.isna(result) or (isinstance(result, float) and np.isnan(result)):
+                                    return None
+                            except (TypeError, ValueError):
+                                pass
+                            return result
+                        return None
+                    except (ValueError, TypeError, OverflowError):
+                        return None
+                    except Exception:
+                        return None
+                
+                def safe_float_value(val):
+                    """실수 값 안전하게 정리 (NaN, Infinity 체크 포함)"""
+                    if val is None:
+                        return None
+                    try:
+                        # pandas/numpy NaN 체크 (문자열 변환 전에 체크)
+                        try:
+                            if pd.isna(val):
+                                return None
+                        except (TypeError, ValueError):
+                            pass
+                        try:
+                            if isinstance(val, (float, int)) and (np.isnan(val) or np.isinf(val)):
+                                return None
+                        except (TypeError, ValueError):
+                            pass
+                        
+                        # 문자열인 경우 숫자로 변환 시도
+                        if isinstance(val, str):
+                            val = val.strip().replace(',', '').replace(' ', '').replace('%', '')
+                            if val.lower() in ['nan', 'none', '', 'null', 'nat', 'none']:
+                                return None
+                            val = float(val)
+                        
+                        # 숫자 타입으로 변환
+                        if isinstance(val, (int, float)):
+                            result = float(val)
+                            # 변환 후 NaN, Infinity 체크
+                            try:
+                                if pd.isna(result) or np.isnan(result) or np.isinf(result):
+                                    return None
+                            except (TypeError, ValueError):
+                                pass
+                            return result
+                        return None
+                    except (ValueError, TypeError, OverflowError):
+                        return None
+                    except Exception:
+                        return None
+                
+                # 각 행을 항상 개별 매출로 저장 (중복 병합 금지)
+                # 최종 값 정리
+                Box_final = safe_int_value(Box)
+                매출단가_final = safe_int_value(매출단가_val)
+                매출이익_final = safe_int_value(매출이익_val)
+                매입단가_final = safe_int_value(매입단가_val)
+                매입금액_final = safe_int_value(매입금액_val)
+                재고보유일_final = safe_int_value(재고보유일)
+                중량_Kg_final = safe_float_value(중량_Kg)
+                이익율_final = safe_float_value(이익율_val)
+                # 매출금액은 필수 필드이므로 None이면 0으로 설정
+                매출금액_final = safe_int_value(매출금액) if 매출금액 is not None else 0
+                if 매출금액_final is None:
+                    매출금액_final = 0
+                
+                # 최종 타입 검증 - Oracle에 전달하기 전에 모든 값이 올바른 타입인지 확인
+                # None이 아닌 경우 반드시 숫자 타입이어야 함
+                if Box_final is not None and not isinstance(Box_final, int):
+                    Box_final = None
+                if 매출단가_final is not None and not isinstance(매출단가_final, int):
+                    매출단가_final = None
+                if 매출이익_final is not None and not isinstance(매출이익_final, int):
+                    매출이익_final = None
+                if 매입단가_final is not None and not isinstance(매입단가_final, int):
+                    매입단가_final = None
+                if 매입금액_final is not None and not isinstance(매입금액_final, int):
+                    매입금액_final = None
+                if 재고보유일_final is not None and not isinstance(재고보유일_final, int):
+                    재고보유일_final = None
+                if 중량_Kg_final is not None and not isinstance(중량_Kg_final, (int, float)):
+                    중량_Kg_final = None
+                if 이익율_final is not None and not isinstance(이익율_final, (int, float)):
+                    이익율_final = None
+                if not isinstance(매출금액_final, int):
+                    매출금액_final = 0
+                
+                # 모든 숫자 필드가 올바른 타입인지 최종 검증
+                # 코드 필드는 문자열로 변환 (숫자로 들어올 수 있음)
+                코드값 = row.get('코드', '')
+                if 코드값:
+                    try:
+                        코드값 = str(코드값).strip()
+                        if 코드값.lower() in ['nan', 'none', '', 'null', 'nat']:
+                            코드값 = None
+                        else:
+                            코드값 = 코드값 or None
+                    except:
+                        코드값 = None
+                else:
+                    코드값 = None
+                
+                try:
+                    # 저장 전 최종 검증 - 모든 숫자 값이 올바른 타입인지 확인
+                    # Oracle은 NaN, Infinity 등을 허용하지 않으므로 엄격하게 체크
+                    # 문자열 필드도 안전하게 처리
+                    def safe_str_value(val, max_length=None):
+                        """문자열 값 안전하게 정리"""
+                        if val is None:
+                            return None
+                        try:
+                            if pd.isna(val):
+                                return None
+                            s = str(val).strip()
+                            if s.lower() in ['nan', 'none', '', 'null', 'nat']:
+                                return None
+                            if max_length and len(s) > max_length:
+                                s = s[:max_length]
+                            return s or None
+                        except:
+                            return None
+
+                    def describe_field(field_name, value, original=None):
+                        """디버깅용 필드 설명 문자열 생성"""
+                        value_type = type(value).__name__ if value is not None else 'None'
+                        original_type = type(original).__name__ if original is not None else 'None'
+                        original_info = f" | 원본: {original} (타입: {original_type})"
+                        try:
+                            field_meta = SalesData._meta.get_field(field_name)
+                            field_class = field_meta.__class__.__name__
+                            db_type = field_meta.db_type(connection)
+                            field_info = f" | 모델필드: {field_class} | DB타입: {db_type}"
+                        except Exception:
+                            field_info = ''
+                        return f"    {field_name}: {value} (타입: {value_type}){original_info}{field_info}"
+
+                    create_params = {
+                        '매출일자': 매출일자,
+                        '코드': safe_str_value(코드값, max_length=50),
+                        '거래처명': 거래처명,
+                        '매출부서': safe_str_value(row.get('매출부서', ''), max_length=100),
+                        '매출담당자': safe_str_value(row.get('매출담당자', ''), max_length=100),
+                        '유통형태': safe_str_value(row.get('유통형태', ''), max_length=100),
+                        '상품코드': safe_str_value(row.get('상품코드', ''), max_length=100),
+                        '상품명': safe_str_value(row.get('상품명', ''), max_length=200),
+                        '브랜드': safe_str_value(row.get('브랜드', ''), max_length=100),
+                        '축종': safe_str_value(row.get('축종', ''), max_length=100),
+                        '부위': safe_str_value(row.get('부위', ''), max_length=100),
+                        '원산지': safe_str_value(row.get('원산지', ''), max_length=100),
+                        '축종_부위': safe_str_value(row.get('축종-부위', ''), max_length=100),
+                        '원산지_축종': safe_str_value(row.get('원산지', ''), max_length=100),
+                        '등급': safe_str_value(row.get('등급', ''), max_length=50),
+                        'Box': Box_final,
+                        '중량_Kg': 중량_Kg_final,
+                        '매출단가': 매출단가_final,
+                        '매출금액': 매출금액_final,
+                        '매출이익': 매출이익_final,
+                        '이익율': 이익율_final,
+                        '매입처': safe_str_value(row.get('매 입 처', row.get('매입 처', '')), max_length=200),
+                        '매입일자': 매입일자,
+                        '재고보유일': 재고보유일_final,
+                        '수입로컬': safe_str_value(row.get('수입/로컬', ''), max_length=20),
+                        '이관재고여부': safe_str_value(row.get('이관재고 여부', ''), max_length=20),
+                        '담당자': safe_str_value(row.get('담당자', ''), max_length=100),
+                        '매입단가': 매입단가_final,
+                        '매입금액': 매입금액_final,
+                        '지점명': safe_str_value(row.get('지점명', ''), max_length=100),
+                        '매출비고': safe_str_value(row.get('매출비고', '')),
+                        '매입비고': safe_str_value(row.get('매입비고', '')),
+                        '이력번호': safe_str_value(row.get('이력번호', ''), max_length=100),
+                        'BL번호': safe_str_value(row.get('B/L번호(도체번호)', ''), max_length=100),
+                    }
+                    
+                    # 저장 전 모든 파라미터 타입 확인 및 로깅
+                    print(f"[디버깅] {row_num}행: 첫 번째 저장 시도 - 모든 필드 값:")
+                    print(f"  [원본 파싱된 값]")
+                    print(describe_field('Box 원본', Box))
+                    print(describe_field('중량_Kg 원본', 중량_Kg))
+                    print(describe_field('매출단가 원본', 매출단가_val))
+                    print(describe_field('매출금액 원본', 매출금액))
+                    print(describe_field('매출이익 원본', 매출이익_val))
+                    print(describe_field('이익율 원본', 이익율_val))
+                    print(describe_field('매입단가 원본', 매입단가_val))
+                    print(describe_field('매입금액 원본', 매입금액_val))
+                    print(describe_field('재고보유일 원본', 재고보유일))
+                    print(f"  [검증 후 최종 값]")
+                    for key, val in create_params.items():
+                        original_val = None
+                        if key == 'Box':
+                            original_val = Box
+                        elif key == '중량_Kg':
+                            original_val = 중량_Kg
+                        elif key == '매출단가':
+                            original_val = 매출단가_val
+                        elif key == '매출금액':
+                            original_val = 매출금액
+                        elif key == '매출이익':
+                            original_val = 매출이익_val
+                        elif key == '이익율':
+                            original_val = 이익율_val
+                        elif key == '재고보유일':
+                            original_val = 재고보유일
+                        elif key == '매입단가':
+                            original_val = 매입단가_val
+                        elif key == '매입금액':
+                            original_val = 매입금액_val
+                        print(describe_field(key, val, original_val))
+                    
+                    # 저장 전 최종 검증 - 모든 필드가 올바른 타입인지 확인
+                    # 특히 이익율이 0.0일 때도 올바르게 저장되도록 보장
+                    # 중복 키 확인
+                    create_params_keys = list(create_params.keys())
+                    if len(create_params_keys) != len(set(create_params_keys)):
+                        duplicates = [k for k in create_params_keys if create_params_keys.count(k) > 1]
+                        print(f"[경고] {row_num}행: create_params에 중복된 키 발견: {set(duplicates)}")
+                    
+                    final_params = {}
+                    for key, val in create_params.items():
+                        # 중복 키 방지
+                        if key in final_params:
+                            print(f"[경고] {row_num}행: 중복된 키 발견: {key}, 기존 값: {final_params[key]}, 새 값: {val}")
+                            continue
+                        
+                        if key == '이익율' and val == 0.0:
+                            # 이익율이 0.0인 경우 명시적으로 float로 변환하여 저장
+                            final_params[key] = 0.0
+                        elif key in ['Box', '중량_Kg', '매출단가', '매출금액', '매출이익', '이익율', '매입단가', '매입금액', '재고보유일']:
+                            # 숫자 필드는 타입 재확인
+                            if val is not None:
+                                try:
+                                    if key in ['Box', '매출단가', '매출이익', '매입단가', '매입금액', '재고보유일']:
+                                        # 정수 필드
+                                        if isinstance(val, (int, float)):
+                                            if pd.isna(val) or (isinstance(val, float) and np.isnan(val)):
+                                                final_params[key] = None
+                                            else:
+                                                final_params[key] = int(val)
+                                        else:
+                                            final_params[key] = None
+                                    elif key == '매출금액':
+                                        # 매출금액은 필수 필드
+                                        if isinstance(val, (int, float)):
+                                            if pd.isna(val) or (isinstance(val, float) and np.isnan(val)):
+                                                final_params[key] = 0
+                                            else:
+                                                final_params[key] = int(val)
+                                        else:
+                                            final_params[key] = 0
+                                    elif key in ['중량_Kg', '이익율']:
+                                        # 실수 필드
+                                        if isinstance(val, (int, float)):
+                                            if pd.isna(val) or (isinstance(val, float) and (np.isnan(val) or np.isinf(val))):
+                                                final_params[key] = None
+                                            else:
+                                                final_params[key] = float(val)
+                                        else:
+                                            final_params[key] = None
+                                    else:
+                                        final_params[key] = val
+                                except Exception as e:
+                                    print(f"[경고] {row_num}행: {key} 필드 최종 검증 중 오류: {str(e)}")
+                                    final_params[key] = None if key != '매출금액' else 0
+                            else:
+                                final_params[key] = None if key != '매출금액' else 0
+                        else:
+                            final_params[key] = val
+                    
+                    SalesData.objects.create(**final_params)
+
+                    created_count += 1
+                except Exception as create_error:
+                    # 생성 실패 시 오류 상세 정보 출력
+                    error_str = str(create_error)
+                    print(f"[디버깅] {row_num}행: 첫 번째 저장 시도 실패")
+                    print(f"  오류 메시지: {error_str}")
+                    print(f"  오류 타입: {type(create_error).__name__}")
+                    debug_all_fields(row_num, '최종 저장 파라미터 (예외 발생 시)', final_params if 'final_params' in locals() else create_params, original_map)
+                    
+                    # ORA-01722 오류인 경우, 어떤 필드가 문제인지 추정
+                    if 'ORA-01722' in error_str or '수치가 부적합합니다' in error_str:
+                        print(f"  [ORA-01722 디버깅] 문제 필드 찾기 시작...")
+                        print(f"  [원본 파싱된 값 - 재확인]")
+                        print(f"    Box 원본: {Box} (타입: {type(Box).__name__ if Box is not None else 'None'})")
+                        print(f"    중량_Kg 원본: {중량_Kg} (타입: {type(중량_Kg).__name__ if 중량_Kg is not None else 'None'})")
+                        print(f"    매출단가 원본: {매출단가_val} (타입: {type(매출단가_val).__name__ if 매출단가_val is not None else 'None'})")
+                        print(f"    매출금액 원본: {매출금액} (타입: {type(매출금액).__name__ if 매출금액 is not None else 'None'})")
+                        print(f"    매출이익 원본: {매출이익_val} (타입: {type(매출이익_val).__name__ if 매출이익_val is not None else 'None'})")
+                        print(f"    이익율 원본: {이익율_val} (타입: {type(이익율_val).__name__ if 이익율_val is not None else 'None'})")
+                        print(f"    매입단가 원본: {매입단가_val} (타입: {type(매입단가_val).__name__ if 매입단가_val is not None else 'None'})")
+                        print(f"    매입금액 원본: {매입금액_val} (타입: {type(매입금액_val).__name__ if 매입금액_val is not None else 'None'})")
+                        print(f"    재고보유일 원본: {재고보유일} (타입: {type(재고보유일).__name__ if 재고보유일 is not None else 'None'})")
+                        print(f"  [검증 후 최종 값]")
+                        for key, val in create_params.items():
+                            if key in ['Box', '중량_Kg', '매출단가', '매출금액', '매출이익', '이익율', '매입단가', '매입금액', '재고보유일']:
+                                print(f"    {key}: {val} (타입: {type(val).__name__ if val is not None else 'None'})")
+                        
+                        # 각 필드를 하나씩 제거하면서 테스트하여 문제 필드 찾기
+                        print(f"  [필드별 검증 시작] 각 필드를 하나씩 제거하여 테스트...")
+                        from django.db import connection
+                        from django.core.exceptions import ValidationError
+                        
+                        # 숫자 필드 목록 (ORA-01722는 주로 숫자 필드에서 발생하지만, 모든 필드 확인)
+                        numeric_fields = ['Box', '중량_Kg', '매출단가', '매출금액', '매출이익', '이익율', '매입단가', '매입금액', '재고보유일']
+                        
+                        # final_params 복사본 생성
+                        test_params = final_params.copy()
+                        
+                        # 각 숫자 필드를 하나씩 제거하면서 테스트
+                        found_issue = False
+                        for field_name in numeric_fields:
+                            if field_name not in test_params:
+                                continue
+                            
+                            # 해당 필드를 제거
+                            original_value = test_params.pop(field_name, None)
+                            
+                            try:
+                                # 필드를 제거한 상태로 INSERT 시도
+                                test_obj = SalesData(**test_params)
+                                test_obj.save()
+                                
+                                # 성공하면 해당 필드가 문제
+                                print(f"    ✓ {field_name} 필드를 제거하니 성공! -> {field_name} 필드가 문제입니다!")
+                                print(f"      문제 값: {original_value} (타입: {type(original_value).__name__ if original_value is not None else 'None'})")
+                                
+                                # 테스트 객체 삭제
+                                test_obj.delete()
+                                
+                                # 문제 필드 찾았으므로 중단
+                                found_issue = True
+                                break
+                            except Exception as test_error:
+                                # 실패하면 해당 필드가 문제가 아님
+                                error_msg = str(test_error)
+                                if 'ORA-01722' in error_msg or '수치가 부적합합니다' in error_msg:
+                                    print(f"    ✗ {field_name} 필드를 제거해도 여전히 오류 발생 -> {field_name}은 문제가 아닙니다")
+                                else:
+                                    print(f"    ✗ {field_name} 필드를 제거했을 때 다른 오류 발생: {error_msg[:100]}")
+                                
+                                # 다시 필드 복원
+                                test_params[field_name] = original_value
+                        
+                        # 숫자 필드에서 문제를 찾지 못한 경우, 다른 필드들도 확인
+                        if not found_issue:
+                            print(f"  [경고] 숫자 필드를 하나씩 제거해도 문제를 찾지 못했습니다.")
+                            print(f"  [추가 디버깅] 모든 필드의 실제 타입과 값 확인:")
+                            for key, val in final_params.items():
+                                try:
+                                    field_meta = SalesData._meta.get_field(key)
+                                    field_type = field_meta.__class__.__name__
+                                    db_type = field_meta.db_type(connection)
+                                    print(f"    {key}: 값={repr(val)} | 타입={type(val).__name__} | 모델필드={field_type} | DB타입={db_type}")
+                                except Exception as e:
+                                    print(f"    {key}: 값={repr(val)} | 타입={type(val).__name__} | 모델필드 정보 없음: {str(e)}")
+                            
+                            # SQL 쿼리 직접 확인
+                            print(f"  [SQL 쿼리 분석] 생성된 SQL 쿼리 확인:")
+                            try:
+                                from django.db.models.sql import compiler
+                                obj = SalesData(**final_params)
+                                compiler = compiler.SQLInsertCompiler(obj.__class__.objects.query, connection)
+                                sql, params = compiler.as_sql()
+                                print(f"    SQL: {sql[:500]}...")
+                                print(f"    Params: {params[:20]}...")
+                            except Exception as sql_error:
+                                print(f"    SQL 분석 실패: {str(sql_error)}")
+                    
+                    # 생성 실패 시 재시도 - 검증된 값이 있으면 사용, 없으면 원본 값으로 재검증
+                    try:
+                        # 재시도 시 원본 값들을 다시 안전하게 처리
+                        def safe_retry_int(val, field_name):
+                            """재시도용 정수 값 안전 처리"""
+                            if val is None:
+                                return None
+                            try:
+                                if pd.isna(val) or (isinstance(val, float) and np.isnan(val)):
+                                    return None
+                                if isinstance(val, (int, float)):
+                                    result = int(val)
+                                    if pd.isna(result) or np.isnan(result):
+                                        return None
+                                    return result
+                                return None
+                            except:
+                                return None
+                        
+                        def safe_retry_float(val, field_name):
+                            """재시도용 실수 값 안전 처리 (0.0도 유효)"""
+                            if val is None:
+                                return None
+                            try:
+                                if pd.isna(val) or (isinstance(val, float) and (np.isnan(val) or np.isinf(val))):
+                                    return None
+                                if isinstance(val, (int, float)):
+                                    result = float(val)
+                                    if pd.isna(result) or np.isnan(result) or np.isinf(result):
+                                        return None
+                                    return result
+                                return None
+                            except:
+                                return None
+                        
+                        # 재시도용 안전한 값 생성
+                        Box_retry = safe_retry_int(Box, 'Box')
+                        중량_Kg_retry = safe_retry_float(중량_Kg, '중량_Kg')
+                        매출단가_retry = safe_retry_int(매출단가_val, '매출단가')
+                        매출금액_retry = safe_retry_int(매출금액, '매출금액') or 0
+                        매출이익_retry = safe_retry_int(매출이익_val, '매출이익')
+                        이익율_retry = safe_retry_float(이익율_val, '이익율')  # 0.0도 유효
+                        매입단가_retry = safe_retry_int(매입단가_val, '매입단가')
+                        매입금액_retry = safe_retry_int(매입금액_val, '매입금액')
+                        재고보유일_retry = safe_retry_int(재고보유일, '재고보유일')
+                        
+                        # 재시도용 안전한 create_params 생성 (문자열 필드도 안전하게 처리)
+                        retry_params = {
+                            '매출일자': 매출일자,
+                            '코드': safe_str_value(코드값, max_length=50),
+                            '거래처명': 거래처명,
+                            '매출부서': safe_str_value(row.get('매출부서', ''), max_length=100),
+                            '매출담당자': safe_str_value(row.get('매출담당자', ''), max_length=100),
+                            '유통형태': safe_str_value(row.get('유통형태', ''), max_length=100),
+                            '상품코드': safe_str_value(row.get('상품코드', ''), max_length=100),
+                            '상품명': safe_str_value(row.get('상품명', ''), max_length=200),
+                            '브랜드': safe_str_value(row.get('브랜드', ''), max_length=100),
+                            '축종': safe_str_value(row.get('축종', ''), max_length=100),
+                            '부위': safe_str_value(row.get('부위', ''), max_length=100),
+                            '원산지': safe_str_value(row.get('원산지', ''), max_length=100),
+                            '축종_부위': safe_str_value(row.get('축종-부위', ''), max_length=100),
+                            '원산지_축종': safe_str_value(row.get('원산지', ''), max_length=100),
+                            '등급': safe_str_value(row.get('등급', ''), max_length=50),
+                            'Box': Box_retry,
+                            '중량_Kg': 중량_Kg_retry,
+                            '매출단가': 매출단가_retry,
+                            '매출금액': 매출금액_retry,
+                            '매출이익': 매출이익_retry,
+                            '이익율': 이익율_retry,
+                            '매입처': safe_str_value(row.get('매 입 처', row.get('매입 처', '')), max_length=200),
+                            '매입일자': 매입일자,
+                            '재고보유일': 재고보유일_retry,
+                            '수입로컬': safe_str_value(row.get('수입/로컬', ''), max_length=20),
+                            '이관재고여부': safe_str_value(row.get('이관재고 여부', ''), max_length=20),
+                            '담당자': safe_str_value(row.get('담당자', ''), max_length=100),
+                            '매입단가': 매입단가_retry,
+                            '매입금액': 매입금액_retry,
+                            '지점명': safe_str_value(row.get('지점명', ''), max_length=100),
+                            '매출비고': safe_str_value(row.get('매출비고', '')),
+                            '매입비고': safe_str_value(row.get('매입비고', '')),
+                            '이력번호': safe_str_value(row.get('이력번호', ''), max_length=100),
+                            'BL번호': safe_str_value(row.get('B/L번호(도체번호)', ''), max_length=100),
+                        }
+                        
+                        # 재시도 전 디버깅 정보 출력
+                        print(f"[디버깅] {row_num}행: 재시도 저장 시도 - 모든 필드 값:")
+                        print(f"  [원본 파싱된 값]")
+                        print(describe_field('Box 원본', Box))
+                        print(describe_field('중량_Kg 원본', 중량_Kg))
+                        print(describe_field('매출단가 원본', 매출단가_val))
+                        print(describe_field('매출금액 원본', 매출금액))
+                        print(describe_field('매출이익 원본', 매출이익_val))
+                        print(describe_field('이익율 원본', 이익율_val))
+                        print(describe_field('매입단가 원본', 매입단가_val))
+                        print(describe_field('매입금액 원본', 매입금액_val))
+                        print(describe_field('재고보유일 원본', 재고보유일))
+                        print(f"  [재시도 파라미터 값]")
+                        for key, val in retry_params.items():
+                            original_val = None
+                            if key == 'Box': original_val = Box
+                            elif key == '중량_Kg': original_val = 중량_Kg
+                            elif key == '매출단가': original_val = 매출단가_val
+                            elif key == '매출금액': original_val = 매출금액
+                            elif key == '매출이익': original_val = 매출이익_val
+                            elif key == '이익율': original_val = 이익율_val
+                            elif key == '재고보유일': original_val = 재고보유일
+                            elif key == '매입단가': original_val = 매입단가_val
+                            elif key == '매입금액': original_val = 매입금액_val
+                            print(describe_field(key, val, original_val))
+                        
+                        # 재시도 전 최종 검증 - 모든 필드가 올바른 타입인지 확인
+                        retry_final_params = {}
+                        for key, val in retry_params.items():
+                            # 중복 키 방지
+                            if key in retry_final_params:
+                                print(f"[경고] {row_num}행: 재시도 중복된 키 발견: {key}, 기존 값: {retry_final_params[key]}, 새 값: {val}")
+                                continue
+                            
+                            if key == '이익율' and val == 0.0:
+                                # 이익율이 0.0인 경우 명시적으로 float로 변환하여 저장
+                                retry_final_params[key] = 0.0
+                            elif key in ['Box', '중량_Kg', '매출단가', '매출금액', '매출이익', '이익율', '매입단가', '매입금액', '재고보유일']:
+                                # 숫자 필드는 타입 재확인
+                                if val is not None:
+                                    try:
+                                        if key in ['Box', '매출단가', '매출이익', '매입단가', '매입금액', '재고보유일']:
+                                            # 정수 필드
+                                            if isinstance(val, (int, float)):
+                                                if pd.isna(val) or (isinstance(val, float) and np.isnan(val)):
+                                                    retry_final_params[key] = None
+                                                else:
+                                                    retry_final_params[key] = int(val)
+                                            else:
+                                                retry_final_params[key] = None
+                                        elif key == '매출금액':
+                                            # 매출금액은 필수 필드
+                                            if isinstance(val, (int, float)):
+                                                if pd.isna(val) or (isinstance(val, float) and np.isnan(val)):
+                                                    retry_final_params[key] = 0
+                                                else:
+                                                    retry_final_params[key] = int(val)
+                                            else:
+                                                retry_final_params[key] = 0
+                                        elif key in ['중량_Kg', '이익율']:
+                                            # 실수 필드
+                                            if isinstance(val, (int, float)):
+                                                if pd.isna(val) or (isinstance(val, float) and (np.isnan(val) or np.isinf(val))):
+                                                    retry_final_params[key] = None
+                                                else:
+                                                    retry_final_params[key] = float(val)
+                                            else:
+                                                retry_final_params[key] = None
+                                        else:
+                                            retry_final_params[key] = val
+                                    except Exception as e:
+                                        print(f"[경고] {row_num}행: 재시도 {key} 필드 최종 검증 중 오류: {str(e)}")
+                                        retry_final_params[key] = None if key != '매출금액' else 0
+                                else:
+                                    retry_final_params[key] = None if key != '매출금액' else 0
+                            else:
+                                retry_final_params[key] = val
+                        
+                        SalesData.objects.create(**retry_final_params)
+                        created_count += 1
+                        errors.append(f"{row_num}행: 일부 숫자 필드 오류로 기본값으로 저장했습니다. (원본 오류: {str(create_error)})")
+                    except Exception as retry_error:
+                        # 재시도도 실패하면 스킵 - 오류를 다시 발생시키지 않고 로그만 남김
+                        retry_error_str = str(retry_error)
+                        print(f"[디버깅] {row_num}행: 재시도 저장 시도도 실패")
+                        print(f"  재시도 오류 메시지: {retry_error_str}")
+                        print(f"  재시도 오류 타입: {type(retry_error).__name__}")
+                        
+                        # ORA-01722 오류인 경우, 어떤 필드가 문제인지 추정
+                        if 'ORA-01722' in retry_error_str or '수치가 부적합합니다' in retry_error_str:
+                            print(f"  [재시도 문제 필드 추정] 숫자 필드 값 재확인:")
+                            for key, val in retry_params.items():
+                                if key in ['Box', '중량_Kg', '매출단가', '매출금액', '매출이익', '이익율', '매입단가', '매입금액', '재고보유일']:
+                                    if val is not None:
+                                        try:
+                                            # 값이 숫자 타입인지 확인
+                                            if not isinstance(val, (int, float)):
+                                                print(f"    ⚠️ {key}: {val} (잘못된 타입: {type(val).__name__})")
+                                            elif isinstance(val, float) and (pd.isna(val) or np.isnan(val) or np.isinf(val)):
+                                                print(f"    ⚠️ {key}: {val} (NaN 또는 Infinity)")
+                                            else:
+                                                print(f"    ✓ {key}: {val} (타입: {type(val).__name__})")
+                                        except Exception as e:
+                                            print(f"    ⚠️ {key}: 검증 중 오류 - {str(e)}")
+                                    else:
+                                        print(f"    - {key}: None")
+                        
+                        skipped_count += 1
+                        skipped_reasons['exception'] += 1
+                        import traceback
+                        error_detail = traceback.format_exc()
+                        error_msg = f"{row_num}행: 재시도도 실패하여 건너뜁니다. (원본 오류: {str(create_error)}, 재시도 오류: {str(retry_error)})"
+                        errors.append(error_msg)
+                        print(f"[오류] {error_msg}")
+                        print(f"  재시도 오류 상세:\n{error_detail}")
             
             except Exception as e:
+                skipped_count += 1
+                skipped_reasons['exception'] += 1
+                import traceback
+                error_detail = traceback.format_exc()
+                print(f"[오류] {row_num}행 처리 중 예외 발생:")
+                print(f"  오류 메시지: {str(e)}")
+                print(f"  오류 상세:\n{error_detail}")
+                print(f"  행 데이터: 거래처명={row.get('거래처명', '')}, 매출일자={row.get('매출일자', '')}, 매출금액={row.get('매출금액', '')}")
+                # 변수가 정의되지 않았을 수 있으므로 안전하게 참조
+                try:
+                    매출금액_val = 매출금액
+                except NameError:
+                    매출금액_val = '정의되지 않음'
+                try:
+                    Box_val = Box
+                except NameError:
+                    Box_val = '정의되지 않음'
+                try:
+                    중량_Kg_val = 중량_Kg
+                except NameError:
+                    중량_Kg_val = '정의되지 않음'
+                try:
+                    재고보유일_val = 재고보유일
+                except NameError:
+                    재고보유일_val = '정의되지 않음'
+                print(f"  파싱된 값: 매출금액={매출금액_val}, Box={Box_val}, 중량_Kg={중량_Kg_val}, 재고보유일={재고보유일_val}")
                 errors.append(f"{row_num}행: {str(e)}")
                 continue
         
+        print(f"[업로드] 총 행 수: {total_rows}, 생성: {created_count}, 건너뛴 행: {skipped_count}")
+        print(f"[업로드] 건너뛴 이유: {skipped_reasons}")
+        
         return Response({
-            'message': f'매출 데이터 업로드 완료. 신규 생성: {created_count}건, 업데이트: {updated_count}건',
+            'message': f'매출 데이터 업로드 완료. 신규 생성: {created_count}건, 업데이트: {updated_count}건, 건너뛴 행: {skipped_count}건',
             'created_count': created_count,
             'updated_count': updated_count,
+            'skipped_count': skipped_count,
+            'skipped_reasons': skipped_reasons,
+            'total_rows': total_rows,
             'errors': errors[:50]  # 오류 최대 50개만 반환
         }, status=status.HTTP_200_OK)
         
     except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"[업로드 오류] CSV 업로드 중 예외 발생:")
+        print(f"  오류 메시지: {str(e)}")
+        print(f"  오류 타입: {type(e).__name__}")
+        print(f"  상세 오류:\n{error_detail}")
         return Response(
             {'error': f'CSV 업로드 중 오류가 발생했습니다: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -2393,3 +3389,19 @@ def users_list_view(request):
         return Response({
             'error': f'사용자 목록 조회 중 오류가 발생했습니다: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+def debug_all_fields(row_num, label, params, original_map):
+    print(f"[디버깅] {row_num}행: {label}")
+    for key in params:
+        val = params[key]
+        original_val = original_map.get(key)
+        value_type = type(val).__name__ if val is not None else 'None'
+        original_type = type(original_val).__name__ if original_val is not None else 'None'
+        try:
+            field_meta = SalesData._meta.get_field(key)
+            field_class = field_meta.__class__.__name__
+            db_type = field_meta.db_type(connection)
+        except Exception:
+            field_class = 'Unknown'
+            db_type = 'Unknown'
+        print(f"  - {key}: value={val!r} (type={value_type}) | original={original_val!r} (type={original_type}) | field={field_class} | db_type={db_type}")

@@ -9,11 +9,12 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
-import { ArrowLeft, Save, Loader2, Building2, Phone, MapPin, Calendar, DollarSign } from "lucide-react"
+import { ArrowLeft, Save, Loader2, Building2, Phone, MapPin, Calendar, DollarSign, Plus, Trash2 } from "lucide-react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
-import { companyApi, Company } from "@/lib/api"
+import { companyApi, Company, companyFinancialStatusApi, CompanyFinancialStatus } from "@/lib/api"
 import { toast } from "@/hooks/use-toast"
+import { LocationSelect } from "@/components/ui/location-select"
 
 export default function CompanyEditPage() {
   const params = useParams()
@@ -26,6 +27,17 @@ export default function CompanyEditPage() {
   // SAP코드여부 체크박스 상태
   const [sapHasPurchase, setSapHasPurchase] = useState(false)
   const [sapHasSales, setSapHasSales] = useState(false)
+  
+  // 재무 정보 상태
+  const [financialStatuses, setFinancialStatuses] = useState<Array<{
+    fiscal_year: string
+    total_assets: string
+    capital: string
+    total_equity: string
+    revenue: string
+    operating_income: string
+    net_income: string
+  }>>([])
 
   // 폼 상태
   const [formData, setFormData] = useState({
@@ -71,6 +83,42 @@ export default function CompanyEditPage() {
         setError(null)
         const companyData = await companyApi.getCompany(params.id as string)
         setCompany(companyData)
+        
+        // 재무 정보 로드
+        try {
+          console.log('재무 정보 로드 시작, company_code:', params.id)
+          const financialData = await companyFinancialStatusApi.getByCompanyCode(params.id as string)
+          console.log('재무 정보 API 응답:', financialData)
+          
+          // 페이지네이션 형식일 수도 있으므로 확인
+          const list = Array.isArray(financialData) ? financialData : (financialData as any)?.results || []
+          console.log('재무 정보 리스트:', list)
+          
+          if (list && list.length > 0) {
+            const mappedData = list.map((item: any) => {
+              const fiscalYear = item.fiscal_year ? item.fiscal_year.split('T')[0].substring(0, 4) : ''
+              console.log('재무 정보 항목:', item, '파싱된 연도:', fiscalYear)
+              return {
+                fiscal_year: fiscalYear,
+                total_assets: item.total_assets?.toString() || '',
+                capital: item.capital?.toString() || '',
+                total_equity: item.total_equity?.toString() || '',
+                revenue: item.revenue?.toString() || '',
+                operating_income: item.operating_income?.toString() || '',
+                net_income: item.net_income?.toString() || '',
+              }
+            })
+            console.log('매핑된 재무 정보:', mappedData)
+            setFinancialStatuses(mappedData)
+          } else {
+            console.log('재무 정보가 없습니다.')
+            setFinancialStatuses([])
+          }
+        } catch (err) {
+          console.error('재무 정보 로드 오류:', err)
+          // 재무 정보가 없어도 계속 진행
+          setFinancialStatuses([])
+        }
         
         // 폼 데이터 초기화
         setFormData({
@@ -141,6 +189,31 @@ export default function CompanyEditPage() {
     }))
   }
 
+  // 재무 정보 핸들러
+  const handleFinancialChange = (index: number, field: string, value: string) => {
+    setFinancialStatuses(prev => {
+      const updated = [...prev]
+      updated[index] = { ...updated[index], [field]: value }
+      return updated
+    })
+  }
+
+  const addFinancialStatus = () => {
+    setFinancialStatuses(prev => [...prev, {
+      fiscal_year: '',
+      total_assets: '',
+      capital: '',
+      total_equity: '',
+      revenue: '',
+      operating_income: '',
+      net_income: '',
+    }])
+  }
+
+  const removeFinancialStatus = (index: number) => {
+    setFinancialStatuses(prev => prev.filter((_, i) => i !== index))
+  }
+
   // SAP코드여부 체크박스 핸들러
   const handleSapCodeTypeChange = (purchase: boolean, sales: boolean) => {
     setSapHasPurchase(purchase)
@@ -195,6 +268,18 @@ export default function CompanyEditPage() {
           cleanData[key] = value
         }
       })
+
+      // 재무 정보 추가 (값이 있는 경우만)
+      const validFinancialStatuses = financialStatuses.filter(fs => 
+        fs.fiscal_year && (
+          fs.total_assets || fs.capital || fs.total_equity || 
+          fs.revenue || fs.operating_income || fs.net_income
+        )
+      )
+      
+      if (validFinancialStatuses.length > 0) {
+        cleanData.financial_statuses = validFinancialStatuses
+      }
 
       const updatedCompany = await companyApi.updateCompany(params.id as string, cleanData)
       
@@ -366,11 +451,10 @@ export default function CompanyEditPage() {
 
               <div className="space-y-2">
                 <Label htmlFor="city_district">시/구</Label>
-                <Input
-                  id="city_district"
+                <LocationSelect
                   value={formData.city_district}
-                  onChange={(e) => handleInputChange('city_district', e.target.value)}
-                  placeholder="예: 서울특별시 강남구"
+                  onChange={(value) => handleInputChange('city_district', value)}
+                  placeholder="지역을 선택하세요"
                 />
               </div>
 
@@ -642,6 +726,121 @@ export default function CompanyEditPage() {
               placeholder="참고사항을 입력하세요..."
               rows={4}
             />
+          </CardContent>
+        </Card>
+
+        {/* 재무 정보 */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center space-x-2">
+                  <DollarSign className="h-5 w-5" />
+                  <span>재무 정보</span>
+                </CardTitle>
+                <CardDescription>회사의 재무 정보를 입력하세요. 연도별로 여러 개를 추가할 수 있습니다.</CardDescription>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={addFinancialStatus}>
+                <Plus className="mr-2 h-4 w-4" />
+                추가
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {financialStatuses.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <p>재무 정보가 없습니다. "추가" 버튼을 클릭하여 추가하세요.</p>
+              </div>
+            ) : (
+              financialStatuses.map((financial, index) => (
+                <div key={index} className="border rounded-lg p-4 space-y-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="font-semibold">재무 정보 #{index + 1}</h4>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => removeFinancialStatus(index)}
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-7 gap-3">
+                    <div className="space-y-2">
+                      <Label className="text-xs">결산년도 *</Label>
+                      <Input
+                        type="text"
+                        placeholder="예: 2024"
+                        value={financial.fiscal_year}
+                        onChange={(e) => handleFinancialChange(index, 'fiscal_year', e.target.value)}
+                        maxLength={4}
+                        className="h-9"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">총자산</Label>
+                      <Input
+                        type="number"
+                        placeholder="총자산"
+                        value={financial.total_assets}
+                        onChange={(e) => handleFinancialChange(index, 'total_assets', e.target.value)}
+                        className="h-9"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">자본금</Label>
+                      <Input
+                        type="number"
+                        placeholder="자본금"
+                        value={financial.capital}
+                        onChange={(e) => handleFinancialChange(index, 'capital', e.target.value)}
+                        className="h-9"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">자본총계</Label>
+                      <Input
+                        type="number"
+                        placeholder="자본총계"
+                        value={financial.total_equity}
+                        onChange={(e) => handleFinancialChange(index, 'total_equity', e.target.value)}
+                        className="h-9"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">매출액</Label>
+                      <Input
+                        type="number"
+                        placeholder="매출액"
+                        value={financial.revenue}
+                        onChange={(e) => handleFinancialChange(index, 'revenue', e.target.value)}
+                        className="h-9"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">영업이익</Label>
+                      <Input
+                        type="number"
+                        placeholder="영업이익"
+                        value={financial.operating_income}
+                        onChange={(e) => handleFinancialChange(index, 'operating_income', e.target.value)}
+                        className="h-9"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">당기순이익</Label>
+                      <Input
+                        type="number"
+                        placeholder="당기순이익"
+                        value={financial.net_income}
+                        onChange={(e) => handleFinancialChange(index, 'net_income', e.target.value)}
+                        className="h-9"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
           </CardContent>
         </Card>
 
