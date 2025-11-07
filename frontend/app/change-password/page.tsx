@@ -88,6 +88,10 @@ export default function ChangePasswordPage() {
             localStorage.removeItem('access_token');
             localStorage.removeItem('refresh_token');
             localStorage.removeItem('user');
+            // 로그아웃 이벤트 발생 (Sidebar에서 감지)
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new Event('auth-change'));
+            }
             alert('로그인 세션이 만료되었습니다. 다시 로그인해주세요.');
             router.push('/login');
             return;
@@ -97,6 +101,10 @@ export default function ChangePasswordPage() {
           localStorage.removeItem('access_token');
           localStorage.removeItem('refresh_token');
           localStorage.removeItem('user');
+          // 로그아웃 이벤트 발생 (Sidebar에서 감지)
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new Event('auth-change'));
+          }
           alert('로그인 세션이 만료되었습니다. 다시 로그인해주세요.');
           router.push('/login');
           return;
@@ -110,6 +118,10 @@ export default function ChangePasswordPage() {
         localStorage.removeItem('access_token');
         localStorage.removeItem('refresh_token');
         localStorage.removeItem('user');
+        // 로그아웃 이벤트 발생 (Sidebar에서 감지)
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('auth-change'));
+        }
         router.push('/login');
       } else {
         if (data.errors) {

@@ -57,6 +57,11 @@ export default function MyPage() {
       setIsEditing(false);
       setMessage('정보가 성공적으로 업데이트되었습니다.');
       
+      // 사용자 정보 업데이트 이벤트 발생 (Sidebar에서 감지)
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('auth-change'));
+      }
+      
       setTimeout(() => setMessage(''), 3000);
     } catch (error) {
       setMessage('정보 업데이트에 실패했습니다.');

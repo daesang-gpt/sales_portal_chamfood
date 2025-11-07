@@ -80,6 +80,11 @@ export default function LoginPage() {
         localStorage.setItem('refresh_token', data.refresh_token || '');
         localStorage.setItem('user', JSON.stringify(data.user));
         
+        // 로그인 성공 이벤트 발생 (Sidebar에서 감지)
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('auth-change'));
+        }
+        
         // 최초 로그인인 경우 비밀번호 변경 페이지로 이동
         if (data.requires_password_change) {
           router.push('/change-password');

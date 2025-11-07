@@ -30,15 +30,51 @@ export function Sidebar() {
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [isAdminUser, setIsAdminUser] = useState(false)
 
-  useEffect(() => {
-    setIsClient(true)
+  // 사용자 정보 업데이트 함수
+  const updateUserInfo = () => {
     const currentUser = getUserFromToken()
     const loggedIn = isAuthenticated()
     const adminUser = isAdmin()
     setUser(currentUser)
     setIsLoggedIn(loggedIn)
     setIsAdminUser(adminUser)
+  }
+
+  useEffect(() => {
+    setIsClient(true)
+    updateUserInfo()
   }, [])
+
+  // pathname 변경 시 사용자 정보 업데이트
+  useEffect(() => {
+    if (isClient) {
+      updateUserInfo()
+    }
+  }, [pathname, isClient])
+
+  // localStorage 변경 감지 (다른 탭에서 로그인/로그아웃 시)
+  useEffect(() => {
+    if (!isClient) return
+
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'access_token' || e.key === 'user' || e.key === 'refresh_token') {
+        updateUserInfo()
+      }
+    }
+
+    // 커스텀 이벤트 리스너 (같은 탭에서 로그인 시)
+    const handleAuthChange = () => {
+      updateUserInfo()
+    }
+
+    window.addEventListener('storage', handleStorageChange)
+    window.addEventListener('auth-change', handleAuthChange)
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange)
+      window.removeEventListener('auth-change', handleAuthChange)
+    }
+  }, [isClient])
 
   const handleLogout = () => {
     logout()

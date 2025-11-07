@@ -74,6 +74,9 @@ export const logout = (): void => {
   localStorage.removeItem('access_token');
   localStorage.removeItem('refresh_token');
   localStorage.removeItem('user');
+  
+  // 로그아웃 이벤트 발생 (Sidebar에서 감지)
+  window.dispatchEvent(new Event('auth-change'));
 };
 
 // API 요청을 위한 인증 헤더 생성
