@@ -34,6 +34,10 @@ X_FRAME_OPTIONS = 'DENY'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 # 로깅 설정 (운영용)
+# 로그 디렉토리 생성 (없으면 자동 생성)
+LOG_DIR = os.path.join(os.path.dirname(BASE_DIR), 'logs')
+os.makedirs(LOG_DIR, exist_ok=True)
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -47,7 +51,7 @@ LOGGING = {
         'file': {
             'level': 'INFO',
             'class': 'logging.FileHandler',
-            'filename': os.path.join(BASE_DIR, 'logs', 'django.log'),
+            'filename': os.path.join(LOG_DIR, 'django.log'),
             'formatter': 'verbose',
         },
     },

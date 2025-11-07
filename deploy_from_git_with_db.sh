@@ -65,6 +65,11 @@ echo "[6/7] Database 마이그레이션 실행 중..."
 cd $DEPLOY_DIR/backend
 source venv/bin/activate
 
+# 로그 디렉토리 생성
+mkdir -p $DEPLOY_DIR/logs
+chmod 755 $DEPLOY_DIR/logs
+chown adm1003701:adm1003701 $DEPLOY_DIR/logs
+
 # 환경변수 설정
 export ORACLE_HOME=/u01/app/oracle/product/19c/db_1
 export LD_LIBRARY_PATH=$ORACLE_HOME/lib:$LD_LIBRARY_PATH
