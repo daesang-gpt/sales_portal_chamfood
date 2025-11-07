@@ -130,14 +130,22 @@ except:
 " 2>/dev/null | tail -1)
 
 if [ "$TABLE_EXISTS" = "0" ] || [ -z "$TABLE_EXISTS" ]; then
-    echo "테이블이 없습니다. --run-syncdb로 스키마 생성 중..."
-    # 테이블이 없으면 --run-syncdb로 현재 모델 상태로 테이블 생성
-    python manage.py migrate --run-syncdb
-    
-    # 모든 마이그레이션을 fake로 표시 (테이블은 이미 생성되었으므로)
-    echo "마이그레이션 이력을 fake로 표시 중..."
+    echo "테이블이 없습니다. 마이그레이션 이력을 먼저 fake로 표시한 후 스키마 생성 중..."
+    # 먼저 모든 마이그레이션을 fake로 표시 (django_migrations 테이블 생성 및 기록)
+    echo "1단계: 모든 마이그레이션을 fake로 표시 중..."
     python manage.py migrate --fake || {
-        echo "⚠️  마이그레이션 fake 실패. 수동으로 처리해야 할 수 있습니다."
+        echo "⚠️  마이그레이션 fake 실패 (정상일 수 있음 - django_migrations 테이블이 없을 수 있음)"
+    }
+    
+    # 그 다음 --run-syncdb로 현재 모델 상태로 테이블 생성
+    echo "2단계: --run-syncdb로 스키마 생성 중..."
+    python manage.py migrate --run-syncdb || {
+        echo "⚠️  --run-syncdb 실패. 대체 방법 시도 중..."
+        # 대체 방법: 마이그레이션 없이 테이블만 생성
+        python manage.py migrate --fake-initial || {
+            echo "❌ 마이그레이션 실패. 수동으로 처리해야 합니다."
+            exit 1
+        }
     }
 else
     echo "테이블이 존재합니다. 마이그레이션 적용 중..."
