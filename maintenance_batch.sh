@@ -57,7 +57,12 @@ if [ -d "/opt" ]; then
     BACKUP_COUNT=$(ls -d /opt/sales-portal-backup-* 2>/dev/null | wc -l)
     if [ "$BACKUP_COUNT" -gt 2 ]; then
         cd /opt
-        ls -t sales-portal-backup-* 2>/dev/null | tail -n +3 | xargs rm -rf 2>/dev/null || true
+        # while read 루프를 사용하여 안전하게 삭제
+        ls -t sales-portal-backup-* 2>/dev/null | tail -n +3 | while read backup_dir; do
+            if [ -n "$backup_dir" ] && [ -d "$backup_dir" ]; then
+                rm -rf "$backup_dir" 2>/dev/null && echo "    ✅ 삭제: $backup_dir" || echo "    ⚠️  삭제 실패: $backup_dir"
+            fi
+        done
         echo "  ✅ 백업 디렉토리 정리 완료 (최신 2개만 유지)"
     fi
 fi
