@@ -57,30 +57,58 @@ def set_company_code_as_primary_key(apps, schema_editor):
                 except Exception as e:
                     print(f"  ⚠️  ID 컬럼 제거 중 오류 (무시됨): {e}")
             
-            # 4. company_code가 이미 Primary Key인지 확인
+            # 4. company_code에 대한 기존 Unique 제약조건 찾기 및 제거
+            cursor.execute("""
+                SELECT constraint_name 
+                FROM user_constraints 
+                WHERE table_name = 'COMPANIES' 
+                AND constraint_type = 'U'
+                AND constraint_name IN (
+                    SELECT constraint_name 
+                    FROM user_cons_columns 
+                    WHERE table_name = 'COMPANIES' 
+                    AND column_name = 'COMPANY_CODE'
+                )
+            """)
+            unique_constraints = cursor.fetchall()
+            
+            for constraint in unique_constraints:
+                try:
+                    cursor.execute(f'ALTER TABLE "COMPANIES" DROP CONSTRAINT "{constraint[0]}"')
+                    print(f"  - Unique 제약조건 제거: {constraint[0]}")
+                except Exception as e:
+                    print(f"  ⚠️  Unique 제약조건 제거 중 오류 (무시됨): {e}")
+            
+            # 5. company_code가 이미 Primary Key인지 확인
             cursor.execute("""
                 SELECT COUNT(*) 
                 FROM user_constraints 
                 WHERE table_name = 'COMPANIES' 
                 AND constraint_type = 'P'
-                AND constraint_name LIKE '%COMPANY_CODE%'
+                AND constraint_name IN (
+                    SELECT constraint_name 
+                    FROM user_cons_columns 
+                    WHERE table_name = 'COMPANIES' 
+                    AND column_name = 'COMPANY_CODE'
+                )
             """)
             has_pk = cursor.fetchone()[0] > 0
             
-            # 5. company_code를 primary key로 설정 (아직 설정되지 않았으면)
+            # 6. company_code를 primary key로 설정 (아직 설정되지 않았으면)
             if not has_pk:
                 try:
                     cursor.execute('ALTER TABLE "COMPANIES" ADD CONSTRAINT "COMPANIES_COMPANY_CODE_PK" PRIMARY KEY ("COMPANY_CODE")')
                     print("  - company_code를 Primary Key로 설정 완료")
                 except Exception as pk_error:
                     error_str = str(pk_error)
-                    if 'ORA-02260' in error_str:
-                        print("  ℹ️  이미 Primary Key가 존재합니다")
+                    if 'ORA-02260' in error_str or 'ORA-02261' in error_str:
+                        print("  ℹ️  이미 Primary Key 또는 Unique 제약조건이 존재합니다")
+                        # 이미 존재하는 경우 무시하고 계속 진행
                     elif 'ORA-02273' in error_str:
                         print("  ⚠️  Foreign Key 참조가 있어 Primary Key 설정 실패")
                         raise
                     else:
-                        raise
+                        print(f"  ⚠️  Primary Key 설정 중 오류 (무시됨): {error_str}")
             else:
                 print("  ℹ️  company_code가 이미 Primary Key로 설정되어 있습니다")
                 
