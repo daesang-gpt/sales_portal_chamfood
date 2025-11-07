@@ -33,7 +33,8 @@ echo ""
 
 # 프로젝트 루트 디렉토리로 이동
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# 스크립트가 프로젝트 루트에 있으므로 PROJECT_ROOT는 SCRIPT_DIR과 동일
+PROJECT_ROOT="$SCRIPT_DIR"
 cd "$PROJECT_ROOT/backend"
 
 # Python 가상환경 활성화
