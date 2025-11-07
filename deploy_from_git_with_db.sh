@@ -14,12 +14,21 @@ REPO_URL="https://github.com/daesang-gpt/sales-portal.git"
 DEPLOY_DIR="/opt/sales-portal"
 BACKUP_DIR="/opt/sales-portal-backup-$(date +%Y%m%d_%H%M%S)"
 
-# 1. 기존 배포 백업
+# 1. 기존 배포 백업 (디스크 공간 확인 후 선택적 백업)
 if [ -d "$DEPLOY_DIR" ]; then
     echo ""
-    echo "[1/7] 기존 배포 백업 중..."
-    sudo cp -r $DEPLOY_DIR $BACKUP_DIR
-    echo "백업 위치: $BACKUP_DIR"
+    echo "[1/7] 기존 배포 백업 확인 중..."
+    # 디스크 공간 확인 (GB 단위)
+    AVAILABLE_SPACE=$(df -BG $DEPLOY_DIR | tail -1 | awk '{print $4}' | sed 's/G//')
+    if [ "$AVAILABLE_SPACE" -gt 5 ]; then
+        echo "백업 생성 중... (사용 가능 공간: ${AVAILABLE_SPACE}GB)"
+        sudo cp -r $DEPLOY_DIR $BACKUP_DIR 2>/dev/null || {
+            echo "⚠️  백업 생성 실패 (디스크 공간 부족 가능). 계속 진행합니다..."
+        }
+        echo "백업 위치: $BACKUP_DIR"
+    else
+        echo "⚠️  디스크 공간 부족 (사용 가능: ${AVAILABLE_SPACE}GB). 백업을 건너뜁니다."
+    fi
 fi
 
 # 2. Git에서 최신 코드 가져오기

@@ -8,9 +8,18 @@ echo "========================================"
 echo "Django Oracle 백엔드 패치 시작..."
 echo "========================================"
 
-# Django Oracle 백엔드 파일 찾기
-DJANGO_ORACLE_BASE=$(find /opt/sales-portal/backend/venv -name "base.py" -path "*/oracle/*" 2>/dev/null | head -1)
-DJANGO_ORACLE_INTRO=$(find /opt/sales-portal/backend/venv -name "introspection.py" -path "*/oracle/*" 2>/dev/null | head -1)
+# Django Oracle 백엔드 파일 찾기 (GIS가 아닌 일반 Oracle 백엔드)
+DJANGO_ORACLE_BASE=$(find /opt/sales-portal/backend/venv -name "base.py" -path "*/db/backends/oracle/*" ! -path "*/gis/*" 2>/dev/null | head -1)
+DJANGO_ORACLE_INTRO=$(find /opt/sales-portal/backend/venv -name "introspection.py" -path "*/db/backends/oracle/*" ! -path "*/gis/*" 2>/dev/null | head -1)
+
+# 대체 경로 시도 (lib64 또는 lib)
+if [ -z "$DJANGO_ORACLE_BASE" ]; then
+    DJANGO_ORACLE_BASE=$(find /opt/sales-portal/backend/venv -name "base.py" -path "*/django/db/backends/oracle/*" ! -path "*/gis/*" 2>/dev/null | head -1)
+fi
+
+if [ -z "$DJANGO_ORACLE_INTRO" ]; then
+    DJANGO_ORACLE_INTRO=$(find /opt/sales-portal/backend/venv -name "introspection.py" -path "*/django/db/backends/oracle/*" ! -path "*/gis/*" 2>/dev/null | head -1)
+fi
 
 if [ -z "$DJANGO_ORACLE_BASE" ]; then
     echo "❌ base.py 파일을 찾을 수 없습니다."
