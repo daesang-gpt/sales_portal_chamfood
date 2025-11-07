@@ -10,7 +10,7 @@ echo "Git 기반 배포 시작 (코드 + DB)"
 echo "========================================"
 
 # 배포 설정
-REPO_URL="https://github.com/your-username/sales-portal.git"  # 실제 Git 저장소 URL로 변경
+REPO_URL="https://github.com/daesang-gpt/sales-portal.git"
 DEPLOY_DIR="/opt/sales-portal"
 BACKUP_DIR="/opt/sales-portal-backup-$(date +%Y%m%d_%H%M%S)"
 
