@@ -15,8 +15,8 @@ const nextConfig = {
   experimental: {
     // 파일 시스템 오류 방지
     optimizePackageImports: [],
-    // Windows 환경에서 파일 시스템 오류 방지
-    esmExternals: 'loose',
+    // Next.js 15에서는 esmExternals가 더 이상 experimental이 아님
+    // esmExternals: 'loose', // 제거 - Next.js 15에서 경고 발생
   },
   // Windows 환경에서 파일 시스템 오류 방지를 위한 설정
   outputFileTracingIncludes: {},

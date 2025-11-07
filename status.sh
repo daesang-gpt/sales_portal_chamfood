@@ -38,7 +38,7 @@ echo ""
 
 # Frontend 상태 확인
 echo "[Frontend]"
-FRONTEND_PID=$(pgrep -f "next start\|next-server" || echo "")
+FRONTEND_PID=$(pgrep -f "next start\|next-server\|next start -H" || echo "")
 if [ -n "$FRONTEND_PID" ]; then
     echo "  상태: ✅ 실행 중"
     echo "  PID: $FRONTEND_PID"

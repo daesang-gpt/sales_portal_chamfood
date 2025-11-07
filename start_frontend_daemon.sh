@@ -7,7 +7,7 @@ PROJECT_ROOT="/opt/sales-portal"
 cd "$PROJECT_ROOT/frontend"
 
 # 이미 실행 중인지 확인
-if pgrep -f "next start" > /dev/null || pgrep -f "next-server" > /dev/null; then
+if pgrep -f "next start" > /dev/null || pgrep -f "next-server" > /dev/null || pgrep -f "next start -H" > /dev/null; then
     echo "⚠️  Frontend가 이미 실행 중입니다."
     echo "   중지하려면: ./stop_frontend.sh"
     exit 1
@@ -41,8 +41,8 @@ echo "서버 주소: http://192.168.99.37:3000"
 echo "로그 파일: $PROJECT_ROOT/logs/frontend.log"
 echo ""
 
-# 백그라운드에서 실행 (nohup 사용)
-nohup npm start > "$PROJECT_ROOT/logs/frontend.log" 2>&1 &
+# 백그라운드에서 실행 (nohup 사용, 외부 IP 접속 허용)
+nohup npm run start:external > "$PROJECT_ROOT/logs/frontend.log" 2>&1 &
 
 # 프로세스 ID 저장
 FRONTEND_PID=$!
