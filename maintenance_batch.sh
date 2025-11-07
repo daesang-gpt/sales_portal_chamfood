@@ -50,7 +50,7 @@ echo "✅ 세션 데이터 정리 완료"
 
 # 3. JWT 토큰 블랙리스트 정리 (만료된 토큰)
 echo "[3/6] 만료된 JWT 토큰 정리 중..."
-python manage.py shell <<EOF 2>/dev/null || echo "⚠️  JWT 토큰 정리 실패 (정상일 수 있음)"
+python manage.py shell <<'PYEOF' 2>/dev/null || echo "⚠️  JWT 토큰 정리 실패 (정상일 수 있음)"
 try:
     from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
     from django.utils import timezone
@@ -59,13 +59,18 @@ try:
     # 7일 이상 된 만료 토큰 삭제
     expired_tokens = OutstandingToken.objects.filter(expires_at__lt=timezone.now() - timedelta(days=7))
     count = expired_tokens.count()
-    expired_tokens.delete()
-    print(f"✅ {count}개의 만료된 JWT 토큰 삭제 완료")
+    if count > 0:
+        expired_tokens.delete()
+        print(f"✅ {count}개의 만료된 JWT 토큰 삭제 완료")
+    else:
+        print("✅ 만료된 JWT 토큰이 없습니다.")
 except ImportError:
     print("⚠️  rest_framework_simplejwt가 설치되지 않았거나 토큰 블랙리스트가 활성화되지 않았습니다.")
+except AttributeError as e:
+    print(f"⚠️  JWT 토큰 블랙리스트 모델을 찾을 수 없습니다: {e}")
 except Exception as e:
     print(f"⚠️  JWT 토큰 정리 중 오류: {e}")
-EOF
+PYEOF
 
 # 4. 정적 파일 수집 (변경사항이 있을 경우)
 echo "[4/6] 정적 파일 수집 중..."
@@ -76,7 +81,7 @@ echo "✅ 정적 파일 수집 완료"
 
 # 5. 데이터베이스 통계 업데이트 (Oracle 성능 최적화)
 echo "[5/6] 데이터베이스 통계 업데이트 중..."
-python manage.py shell <<EOF 2>/dev/null || echo "⚠️  DB 통계 업데이트 실패"
+python manage.py shell <<'PYEOF' 2>/dev/null || echo "⚠️  DB 통계 업데이트 실패"
 from django.db import connection
 
 try:
@@ -86,14 +91,19 @@ try:
         updated_count = 0
         for table in tables:
             try:
-                cursor.execute(f"BEGIN DBMS_STATS.GATHER_TABLE_STATS(ownname => USER, tabname => '{table}'); END;")
+                # Oracle PL/SQL 블록 실행 (세미콜론 포함)
+                sql = f"BEGIN DBMS_STATS.GATHER_TABLE_STATS(ownname => USER, tabname => '{table}'); END;"
+                cursor.execute(sql)
                 updated_count += 1
             except Exception as e:
                 print(f"⚠️  {table} 통계 업데이트 실패: {e}")
-        print(f"✅ {updated_count}개 테이블 통계 업데이트 완료")
+        if updated_count > 0:
+            print(f"✅ {updated_count}개 테이블 통계 업데이트 완료")
+        else:
+            print("⚠️  모든 테이블 통계 업데이트 실패 (무시 가능)")
 except Exception as e:
     print(f"⚠️  DB 통계 업데이트 중 오류: {e}")
-EOF
+PYEOF
 
 # 6. 디스크 공간 확인 및 경고
 echo "[6/6] 디스크 공간 확인 중..."
