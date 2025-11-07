@@ -7,7 +7,28 @@ def set_company_code_as_primary_key(apps, schema_editor):
     """company_code를 primary key로 설정"""
     with schema_editor.connection.cursor() as cursor:
         try:
-            # 먼저 기존 ID primary key 제약 조건 제거
+            # 1. 먼저 company_code를 참조하는 모든 Foreign Key 제약조건 찾기 및 제거
+            cursor.execute("""
+                SELECT constraint_name, table_name 
+                FROM user_constraints 
+                WHERE constraint_type = 'R'
+                AND r_constraint_name IN (
+                    SELECT constraint_name 
+                    FROM user_constraints 
+                    WHERE table_name = 'COMPANIES' 
+                    AND constraint_type IN ('P', 'U')
+                )
+            """)
+            fk_constraints = cursor.fetchall()
+            
+            for fk_name, fk_table in fk_constraints:
+                try:
+                    cursor.execute(f'ALTER TABLE "{fk_table}" DROP CONSTRAINT "{fk_name}"')
+                    print(f"  - Foreign Key 제약조건 제거: {fk_table}.{fk_name}")
+                except Exception as e:
+                    print(f"  ⚠️  Foreign Key 제약조건 제거 중 오류 (무시됨): {e}")
+            
+            # 2. 기존 ID primary key 제약 조건 제거
             cursor.execute("""
                 SELECT constraint_name 
                 FROM user_constraints 
@@ -16,56 +37,58 @@ def set_company_code_as_primary_key(apps, schema_editor):
             """)
             pk_constraint = cursor.fetchone()
             if pk_constraint:
-                # 외래 키 참조 확인
-                cursor.execute("""
-                    SELECT constraint_name 
-                    FROM user_constraints 
-                    WHERE table_name IN (
-                        SELECT table_name 
-                        FROM user_constraints 
-                        WHERE constraint_type = 'R' 
-                        AND r_constraint_name = :pk_constraint
-                    )
-                """, {'pk_constraint': pk_constraint[0]})
-                fk_constraints = cursor.fetchall()
-                
-                # 외래 키 제약 조건 제거
-                for fk_constraint in fk_constraints:
-                    try:
-                        cursor.execute(f'ALTER TABLE "{fk_constraint[0]}" DROP CONSTRAINT "{fk_constraint[0]}"')
-                    except Exception as e:
-                        print(f"외래 키 제약 조건 제거 중 오류 (무시됨): {e}")
-                
-                # Primary key 제약 조건 제거
-                cursor.execute(f'ALTER TABLE "COMPANIES" DROP CONSTRAINT "{pk_constraint[0]}"')
+                try:
+                    cursor.execute(f'ALTER TABLE "COMPANIES" DROP CONSTRAINT "{pk_constraint[0]}" CASCADE')
+                    print(f"  - 기존 Primary Key 제약조건 제거: {pk_constraint[0]}")
+                except Exception as e:
+                    print(f"  ⚠️  Primary Key 제약조건 제거 중 오류: {e}")
             
-            # company_code가 이미 primary key인지 확인
+            # 3. ID 컬럼이 있으면 제거 (이미 제거되었을 수 있음)
             cursor.execute("""
-                SELECT constraint_name 
+                SELECT COUNT(*) 
+                FROM user_tab_columns 
+                WHERE table_name = 'COMPANIES' AND column_name = 'ID'
+            """)
+            has_id = cursor.fetchone()[0] > 0
+            if has_id:
+                try:
+                    cursor.execute('ALTER TABLE "COMPANIES" DROP COLUMN "ID"')
+                    print("  - ID 컬럼 제거 완료")
+                except Exception as e:
+                    print(f"  ⚠️  ID 컬럼 제거 중 오류 (무시됨): {e}")
+            
+            # 4. company_code가 이미 Primary Key인지 확인
+            cursor.execute("""
+                SELECT COUNT(*) 
                 FROM user_constraints 
                 WHERE table_name = 'COMPANIES' 
                 AND constraint_type = 'P'
                 AND constraint_name LIKE '%COMPANY_CODE%'
             """)
-            existing_pk = cursor.fetchone()
+            has_pk = cursor.fetchone()[0] > 0
             
-            if not existing_pk:
-                # company_code를 primary key로 설정
+            # 5. company_code를 primary key로 설정 (아직 설정되지 않았으면)
+            if not has_pk:
                 try:
                     cursor.execute('ALTER TABLE "COMPANIES" ADD CONSTRAINT "COMPANIES_COMPANY_CODE_PK" PRIMARY KEY ("COMPANY_CODE")')
-                    print("✅ company_code를 Primary key로 설정했습니다.")
+                    print("  - company_code를 Primary Key로 설정 완료")
                 except Exception as pk_error:
-                    # 이미 primary key가 설정되어 있으면 무시
-                    error_msg = str(pk_error)
-                    if 'ORA-02260' in error_msg or 'ORA-02273' in error_msg or 'already exists' in error_msg.lower():
-                        print(f"⚠️  Primary key가 이미 설정되어 있습니다 (무시됨): {pk_error}")
+                    error_str = str(pk_error)
+                    if 'ORA-02260' in error_str:
+                        print("  ℹ️  이미 Primary Key가 존재합니다")
+                    elif 'ORA-02273' in error_str:
+                        print("  ⚠️  Foreign Key 참조가 있어 Primary Key 설정 실패")
+                        raise
                     else:
                         raise
             else:
-                print("✅ company_code가 이미 Primary key로 설정되어 있습니다.")
+                print("  ℹ️  company_code가 이미 Primary Key로 설정되어 있습니다")
+                
         except Exception as e:
-            print(f"⚠️  Primary key 설정 중 오류 (일부 무시됨): {e}")
-            # 마이그레이션을 계속 진행할 수 있도록 예외를 다시 발생시키지 않음
+            print(f"⚠️  Primary key 설정 중 오류: {e}")
+            # 오류가 발생해도 계속 진행 (이미 설정되어 있을 수 있음)
+            if 'ORA-02260' not in str(e) and 'ORA-02273' not in str(e):
+                raise
 
 
 class Migration(migrations.Migration):
@@ -80,6 +103,8 @@ class Migration(migrations.Migration):
             set_company_code_as_primary_key,
             reverse_code=migrations.RunPython.noop
         ),
+        # Django 모델 상태만 업데이트 (데이터베이스는 이미 RunPython에서 처리됨)
+        # 주의: AlterField는 실제로 DB 변경을 시도하지 않도록 주의
         migrations.AlterField(
             model_name='company',
             name='company_code',
