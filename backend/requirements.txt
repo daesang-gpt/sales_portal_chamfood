@@ -5,7 +5,8 @@ djangorestframework-simplejwt>=5.2.0
 django-cors-headers>=4.0.0
 
 # Oracle Database 연결
-cx_Oracle>=8.3.0
+# cx_Oracle>=8.3.0  # Oracle Instant Client 필요, oracledb로 대체
+oracledb>=3.0.0  # Oracle Instant Client 없이도 작동, Django 4.2+ 지원
 
 # AI/ML 패키지 (KeyBERT 및 의존성)
 keybert>=0.8.0
@@ -24,3 +25,6 @@ openpyxl>=3.0.9
 
 # 개발 도구 (선택사항)
 django-extensions>=3.2.0
+
+# 스케줄러
+django-crontab>=0.7.1

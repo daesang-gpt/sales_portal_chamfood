@@ -175,7 +175,145 @@ nohup npm start > frontend.log 2>&1 &
 3. **Oracle Client 설치**: cx_Oracle 사용을 위한 Oracle Instant Client 설치 필요
 4. **로그 디렉토리**: `/path/to/logs` 디렉토리 생성 및 권한 설정
 
+## 데이터베이스 포함 배포 (코드 + DB)
+
+개발서버에서 운영서버로 코드와 데이터베이스 데이터를 함께 배포하는 방법입니다.
+
+### 배포 프로세스
+
+#### 1단계: 개발서버에서 배포 준비 (Windows)
+
+```batch
+# 프로젝트 루트에서 실행
+deploy_with_db.bat
+```
+
+이 스크립트는 다음 작업을 수행합니다:
+1. 개발 DB에서 데이터 덤프 생성 (`export_db.bat` 실행)
+2. 덤프 파일을 `db_dumps/` 디렉토리에 저장
+3. Git에 코드와 덤프 파일 추가 및 커밋
+4. GitHub에 푸시
+
+**수동 실행 방법:**
+
+```batch
+# 1. DB 덤프 생성
+export_db.bat
+
+# 2. Git에 추가 및 커밋
+git add .
+git commit -m "Deploy to production with DB - YYYY-MM-DD"
+
+# 3. GitHub에 푸시
+git push origin main
+```
+
+#### 2단계: 운영서버에서 배포 실행 (Linux)
+
+```bash
+# 운영서버에 SSH 접속 후
+cd /opt/sales-portal
+chmod +x deploy_from_git_with_db.sh
+./deploy_from_git_with_db.sh
+```
+
+이 스크립트는 다음 작업을 수행합니다:
+1. Git에서 최신 코드 가져오기
+2. 기존 배포 백업 생성
+3. Backend/Frontend 의존성 설치 및 빌드
+4. Database 마이그레이션 실행
+5. 데이터베이스 복원 (덤프 파일이 있는 경우)
+
+**수동 실행 방법:**
+
+```bash
+# 1. Git에서 코드 가져오기
+cd /opt/sales-portal
+git pull origin main
+
+# 2. Backend 설정
+cd backend
+source venv/bin/activate
+pip install -r requirements.txt
+
+# 3. Frontend 빌드
+cd ../frontend
+npm install
+npm run build
+
+# 4. Database 마이그레이션
+cd ../backend
+source venv/bin/activate
+export ORACLE_HOME=/u01/app/oracle/product/19c/db_1
+export LD_LIBRARY_PATH=$ORACLE_HOME/lib:$LD_LIBRARY_PATH
+export DJANGO_SETTINGS_MODULE=settings.production
+export DB_NAME=192.168.99.37:1521/XEPDB1
+export DB_USER=salesportal
+export DB_PASSWORD=salesportal123
+python manage.py migrate
+
+# 5. 데이터베이스 복원
+cd /opt/sales-portal
+chmod +x import_db.sh
+./import_db.sh db_dumps/db_dump_YYYYMMDD_HHMMSS.json
+```
+
+### 데이터베이스 덤프/복원 상세
+
+#### 개발 DB 덤프 생성 (`export_db.bat`)
+
+개발 환경의 Oracle DB에서 모든 데이터를 JSON 형식으로 내보냅니다.
+
+**덤프되는 모델:**
+- User (사용자)
+- Company (회사)
+- Report (영업일지)
+- CompanyFinancialStatus (회사 재무상태)
+- SalesData (매출정보)
+
+**덤프 파일 위치:** `db_dumps/db_dump_YYYYMMDD_HHMMSS.json`
+
+#### 운영 DB 복원 (`import_db.sh`)
+
+덤프 파일을 운영 DB에 복원합니다.
+
+**주의사항:**
+- ⚠️ 운영 DB의 기존 데이터가 덮어씌워질 수 있습니다
+- 복원 전에 운영 DB 백업을 권장합니다
+- 복원 시 기존 데이터 삭제 여부를 선택할 수 있습니다
+
+**사용법:**
+```bash
+./import_db.sh db_dumps/db_dump_20250115_123456.json
+```
+
+### 원격 배포 (자동화)
+
+개발서버에서 운영서버로 직접 배포를 실행하려면:
+
+```batch
+REM Windows PowerShell 또는 CMD에서
+ssh adm1003701@192.168.99.37 "cd /opt/sales-portal && ./deploy_from_git_with_db.sh"
+```
+
+### 덤프 파일 관리
+
+- 덤프 파일은 `db_dumps/` 디렉토리에 저장됩니다
+- 파일명 형식: `db_dump_YYYYMMDD_HHMMSS.json`
+- Git에 포함되므로 `.gitignore`에 추가하지 않습니다
+- 덤프 파일이 큰 경우 Git LFS 사용을 고려하세요
+
+### 주의사항
+
+1. **데이터 백업**: 운영 DB 복원 전 반드시 백업을 수행하세요
+2. **덤프 파일 크기**: 덤프 파일이 큰 경우 Git LFS 사용을 권장합니다
+3. **데이터 무결성**: 외래키 제약조건으로 인해 데이터 삭제 순서가 중요합니다
+4. **환경 변수**: 운영서버에서 올바른 환경 변수가 설정되어 있는지 확인하세요
+5. **권한**: 운영서버에서 스크립트 실행 권한이 있는지 확인하세요 (`chmod +x`)
+
 ## 트러블슈팅
 - Oracle 연결 오류 시 tnsping으로 연결 테스트
 - 권한 오류 시 사용자 권한 재확인
 - 포트 접근 오류 시 방화벽 설정 확인
+- 덤프 파일 복원 실패 시 덤프 파일 형식 확인
+- 외래키 제약조건 오류 시 데이터 삭제 순서 확인
