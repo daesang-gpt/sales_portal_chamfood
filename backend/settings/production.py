@@ -46,6 +46,10 @@ LOGGING = {
             'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
             'style': '{',
         },
+        'detailed': {
+            'format': '{levelname} {asctime} {pathname}:{lineno} {funcName} {message}',
+            'style': '{',
+        },
     },
     'handlers': {
         'file': {
@@ -54,12 +58,33 @@ LOGGING = {
             'filename': os.path.join(LOG_DIR, 'django.log'),
             'formatter': 'verbose',
         },
+        'error_file': {
+            'level': 'ERROR',
+            'class': 'logging.FileHandler',
+            'filename': os.path.join(LOG_DIR, 'django_error.log'),
+            'formatter': 'detailed',
+        },
+        'console': {
+            'level': 'ERROR',
+            'class': 'logging.StreamHandler',
+            'formatter': 'detailed',
+        },
     },
     'loggers': {
         'django': {
-            'handlers': ['file'],
+            'handlers': ['file', 'error_file'],
             'level': 'INFO',
             'propagate': True,
+        },
+        'django.request': {
+            'handlers': ['error_file', 'console'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+        'django.server': {
+            'handlers': ['error_file', 'console'],
+            'level': 'ERROR',
+            'propagate': False,
         },
     },
 }

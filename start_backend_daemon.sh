@@ -37,6 +37,14 @@ source venv/bin/activate
 # 로그 디렉토리 생성
 mkdir -p "$PROJECT_ROOT/logs"
 
+# 로그 파일 권한 설정 (이미 존재하는 경우)
+if [ -f "$PROJECT_ROOT/logs/backend.log" ]; then
+    chmod 644 "$PROJECT_ROOT/logs/backend.log" 2>/dev/null || true
+fi
+
+# umask 설정 (로그 파일이 읽기 가능하도록)
+umask 022
+
 echo "========================================"
 echo "Django Backend 백그라운드 시작 중..."
 echo "========================================"
@@ -50,6 +58,11 @@ nohup python manage.py runserver 0.0.0.0:8000 > "$PROJECT_ROOT/logs/backend.log"
 # 프로세스 ID 저장
 BACKEND_PID=$!
 echo $BACKEND_PID > "$PROJECT_ROOT/logs/backend.pid"
+
+# 로그 파일 권한 명시적 설정
+sleep 1
+chmod 644 "$PROJECT_ROOT/logs/backend.log" 2>/dev/null || true
+chmod 644 "$PROJECT_ROOT/logs/backend.pid" 2>/dev/null || true
 
 echo "✅ Backend가 백그라운드에서 시작되었습니다."
 echo "   PID: $BACKEND_PID"

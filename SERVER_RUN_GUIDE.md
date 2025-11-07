@@ -679,6 +679,103 @@ source /root/.bashrc
 
 **참고**: 영구 설정은 선택사항입니다. 스크립트가 자동으로 설정하므로 필수는 아닙니다.
 
+### 로그 파일 권한 문제
+
+로그 파일을 확인할 수 없는 경우 (`Permission denied`):
+
+```bash
+# 로그 파일 권한 수정 스크립트 실행
+cd /opt/sales-portal
+chmod +x fix_log_permissions.sh
+./fix_log_permissions.sh
+
+# 또는 수동 수정
+chmod 644 /opt/sales-portal/logs/*.log
+chmod 755 /opt/sales-portal/logs
+```
+
+**로그 확인 방법**:
+```bash
+# ❌ 잘못된 방법 (파일을 실행하려고 시도)
+/opt/sales-portal/logs/backend.log
+
+# ✅ 올바른 방법 (tail 명령어 사용)
+tail -f /opt/sales-portal/logs/backend.log
+tail -n 50 /opt/sales-portal/logs/backend.log
+cat /opt/sales-portal/logs/backend.log
+```
+
+### 서버 에러 500 해결
+
+서버가 실행 중이지만 에러 500이 발생하는 경우:
+
+#### 1. 서버 진단 스크립트 실행
+
+```bash
+cd /opt/sales-portal
+chmod +x diagnose_server_error.sh
+./diagnose_server_error.sh
+```
+
+이 스크립트는 다음을 확인합니다:
+- 데이터베이스 연결 상태
+- Django 설정 확인
+- 마이그레이션 상태
+- 정적 파일 존재 여부
+- 최근 에러 로그
+
+#### 2. 에러 로그 확인
+
+```bash
+# Backend 로그 확인
+tail -n 100 /opt/sales-portal/logs/backend.log
+
+# Django 에러 로그 확인 (새로 추가됨)
+tail -n 100 /opt/sales-portal/backend/logs/django_error.log
+
+# 에러만 필터링
+grep -i -E "error|exception|traceback" /opt/sales-portal/logs/backend.log | tail -20
+```
+
+#### 3. 일반적인 원인 및 해결 방법
+
+**정적 파일 누락**:
+```bash
+cd /opt/sales-portal/backend
+source venv/bin/activate
+export DJANGO_SETTINGS_MODULE=settings.production
+python manage.py collectstatic --noinput
+```
+
+**마이그레이션 미적용**:
+```bash
+cd /opt/sales-portal/backend
+source venv/bin/activate
+export DJANGO_SETTINGS_MODULE=settings.production
+export DB_NAME=192.168.99.37:1521/XEPDB1
+export DB_USER=salesportal
+export DB_PASSWORD=salesportal123
+export ORACLE_HOME=/u01/app/oracle/product/19c/db_1
+export LD_LIBRARY_PATH=$ORACLE_HOME/lib:$LD_LIBRARY_PATH
+export PATH=$ORACLE_HOME/bin:$PATH
+
+python manage.py migrate
+```
+
+**데이터베이스 연결 문제**:
+```bash
+# DB 연결 테스트
+python manage.py shell -c "from django.db import connection; cursor = connection.cursor(); cursor.execute('SELECT 1 FROM DUAL'); print('✅ DB 연결 성공!')"
+```
+
+**서버 재시작**:
+```bash
+cd /opt/sales-portal
+./stop_all.sh
+sleep 2
+./start_all_daemon.sh
+```
+
 ### 서버가 시작되지 않는 경우
 
 #### 1. 포트가 이미 사용 중인지 확인
@@ -828,6 +925,12 @@ pip install -r requirements.txt
 # 경고사항 자동 수정
 ./check_prerequisites.sh --fix
 
+# 로그 파일 권한 수정
+./fix_log_permissions.sh
+
+# 서버 에러 진단
+./diagnose_server_error.sh
+
 # 상태 확인
 ./status.sh
 
@@ -839,6 +942,9 @@ pip install -r requirements.txt
 
 # Backend 로그 확인
 tail -f /opt/sales-portal/logs/backend.log
+
+# Django 에러 로그 확인
+tail -f /opt/sales-portal/backend/logs/django_error.log
 
 # Frontend 로그 확인
 tail -f /opt/sales-portal/logs/frontend.log
