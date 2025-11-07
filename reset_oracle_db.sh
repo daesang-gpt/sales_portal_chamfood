@@ -102,15 +102,31 @@ print("✅ DB 초기화 완료")
 PYTHON_SCRIPT
 
 echo ""
-echo "[2/3] 마이그레이션 파일 삭제 (migrations 디렉토리 제외)..."
-# migrations 디렉토리는 유지하되, __pycache__만 삭제
-find myapi/migrations -name "*.pyc" -delete 2>/dev/null || true
-find myapi/migrations -name "__pycache__" -type d -exec rm -r {} + 2>/dev/null || true
+echo "[2/3] 마이그레이션 파일 백업 및 초기화..."
+# 기존 마이그레이션 파일 백업 (필요시 참고용)
+if [ -d "myapi/migrations" ]; then
+    MIGRATIONS_BACKUP="myapi/migrations_backup_$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$MIGRATIONS_BACKUP"
+    cp -r myapi/migrations/* "$MIGRATIONS_BACKUP/" 2>/dev/null || true
+    echo "기존 마이그레이션 파일 백업: $MIGRATIONS_BACKUP"
+    
+    # 마이그레이션 파일 삭제 (__init__.py 제외)
+    find myapi/migrations -name "*.py" ! -name "__init__.py" -delete 2>/dev/null || true
+    find myapi/migrations -name "*.pyc" -delete 2>/dev/null || true
+    find myapi/migrations -name "__pycache__" -type d -exec rm -r {} + 2>/dev/null || true
+    echo "✅ 기존 마이그레이션 파일 삭제 완료"
+fi
 
 echo ""
 echo "[3/3] 마이그레이션 재생성 및 적용 중..."
-# 마이그레이션 파일은 그대로 두고 migrate 실행
-python manage.py migrate --run-syncdb
+# Django 마이그레이션 테이블 초기화 (필요시)
+python manage.py migrate --fake-initial || true
+
+# 현재 모델 상태로 새 마이그레이션 생성
+python manage.py makemigrations myapi
+
+# 마이그레이션 적용
+python manage.py migrate
 
 echo ""
 echo "========================================"
