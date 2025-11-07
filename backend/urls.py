@@ -16,6 +16,8 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from django.conf import settings
+from django.conf.urls.static import static
 import os
 
 # dumpdata 실행 시 views import 건너뛰기 (torch DLL 오류 방지)
@@ -24,6 +26,11 @@ if os.environ.get('SKIP_VIEWS_IMPORT', 'False').lower() != 'true':
         path('admin/', admin.site.urls),
         path('api/', include('myapi.urls')),
     ]
+    
+    # 정적 파일 서빙 (운영 환경에서 개발 서버 사용 시)
+    # 실제 운영 환경에서는 웹 서버(Nginx 등)에서 정적 파일을 제공하는 것이 권장됨
+    if settings.DEBUG or os.environ.get('SERVE_STATIC', 'False').lower() == 'true':
+        urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
 else:
     # dumpdata 실행 시 URL 패턴 비활성화
     urlpatterns = []
