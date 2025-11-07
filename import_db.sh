@@ -101,7 +101,8 @@ fi
 # 데이터 복원
 echo ""
 echo "데이터 복원 중..."
-cd "$PROJECT_ROOT"
+# backend 디렉토리에서 실행 (manage.py가 있음)
+cd "$PROJECT_ROOT/backend"
 python manage.py loaddata "$DUMP_FILE"
 
 if [ $? -eq 0 ]; then
