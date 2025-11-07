@@ -1,8 +1,26 @@
 from rest_framework import serializers
 from .models import Company, Report, User, CompanyFinancialStatus, SalesData
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+import datetime
+
+
+class OracleDateField(serializers.DateField):
+    """Oracle 호환성을 위한 DateField - datetime을 date로 변환"""
+    def to_representation(self, value):
+        if value is None:
+            return None
+        if isinstance(value, datetime.datetime):
+            return value.date().isoformat()
+        elif isinstance(value, datetime.date):
+            return value.isoformat()
+        return super().to_representation(value)
 
 class CompanySerializer(serializers.ModelSerializer):
+    # Oracle 호환성을 위해 DateField를 커스텀 필드로 교체
+    established_date = OracleDateField(required=False, allow_null=True)
+    code_create_date = OracleDateField(required=False, allow_null=True)
+    transaction_start_date = OracleDateField(required=False, allow_null=True)
+    
     class Meta:
         model = Company
         fields = [
@@ -46,6 +64,9 @@ class ReportSerializer(serializers.ModelSerializer):
     company_code_resolved = serializers.SerializerMethodField()
     company_name_from_obj = serializers.SerializerMethodField()
     company_city_district_from_obj = serializers.SerializerMethodField()
+    
+    # Oracle 호환성을 위해 DateField를 커스텀 필드로 교체
+    visitDate = OracleDateField()
     
     class Meta:
         model = Report
@@ -344,6 +365,9 @@ class CompanyFinancialStatusSerializer(serializers.ModelSerializer):
     company_code_sap = serializers.SerializerMethodField()
     company = serializers.SerializerMethodField()
     
+    # Oracle 호환성을 위해 DateField를 커스텀 필드로 교체
+    fiscal_year = OracleDateField()
+    
     class Meta:
         model = CompanyFinancialStatus
         fields = [
@@ -393,6 +417,10 @@ class CompanyFinancialStatusSerializer(serializers.ModelSerializer):
             return None
 
 class SalesDataSerializer(serializers.ModelSerializer):
+    # Oracle 호환성을 위해 DateField를 커스텀 필드로 교체
+    매출일자 = OracleDateField()
+    매입일자 = OracleDateField(required=False, allow_null=True)
+    
     class Meta:
         model = SalesData
         fields = [
