@@ -113,7 +113,14 @@ export DB_USER=salesportal
 export DB_PASSWORD=salesportal123
 
 # 마이그레이션 실행
-python manage.py migrate
+echo "마이그레이션 상태 확인 중..."
+python manage.py showmigrations myapi | tail -5 || true
+
+# 마이그레이션 실행
+# --fake-initial: 초기 마이그레이션이 이미 적용된 것으로 간주 (테이블이 존재하면)
+# 이렇게 하면 처음 DB 생성 시에는 모든 마이그레이션을 실행하고,
+# 이후 Git pull 시에는 새로운 마이그레이션만 적용됨
+python manage.py migrate --fake-initial
 
 # 7. 데이터베이스 복원 (덤프 파일이 있는 경우)
 echo ""
