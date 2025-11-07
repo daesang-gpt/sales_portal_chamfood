@@ -81,7 +81,7 @@ def set_company_code_as_primary_key(apps, schema_editor):
             
             # 5. company_code가 이미 Primary Key인지 확인
             cursor.execute("""
-                SELECT COUNT(*) 
+                SELECT constraint_name 
                 FROM user_constraints 
                 WHERE table_name = 'COMPANIES' 
                 AND constraint_type = 'P'
@@ -92,32 +92,109 @@ def set_company_code_as_primary_key(apps, schema_editor):
                     AND column_name = 'COMPANY_CODE'
                 )
             """)
-            has_pk = cursor.fetchone()[0] > 0
+            existing_pk = cursor.fetchone()
             
-            # 6. company_code를 primary key로 설정 (아직 설정되지 않았으면)
-            if not has_pk:
+            if existing_pk:
+                print(f"  ℹ️  company_code가 이미 Primary Key로 설정되어 있습니다: {existing_pk[0]}")
+            else:
+                # 6. company_code를 primary key로 설정
                 try:
                     cursor.execute('ALTER TABLE "COMPANIES" ADD CONSTRAINT "COMPANIES_COMPANY_CODE_PK" PRIMARY KEY ("COMPANY_CODE")')
-                    print("  - company_code를 Primary Key로 설정 완료")
+                    print("  ✅ company_code를 Primary Key로 설정 완료")
                 except Exception as pk_error:
                     error_str = str(pk_error)
-                    if 'ORA-02260' in error_str or 'ORA-02261' in error_str:
-                        print("  ℹ️  이미 Primary Key 또는 Unique 제약조건이 존재합니다")
-                        # 이미 존재하는 경우 무시하고 계속 진행
+                    if 'ORA-02260' in error_str:
+                        # 이미 Primary Key가 존재 (다른 이름으로)
+                        print("  ⚠️  이미 Primary Key가 존재합니다. 확인 중...")
+                        cursor.execute("""
+                            SELECT constraint_name 
+                            FROM user_constraints 
+                            WHERE table_name = 'COMPANIES' 
+                            AND constraint_type = 'P'
+                        """)
+                        existing_pk = cursor.fetchone()
+                        if existing_pk:
+                            print(f"  ℹ️  기존 Primary Key: {existing_pk[0]}")
+                        else:
+                            raise
+                    elif 'ORA-02261' in error_str:
+                        # Unique 제약조건이 남아있음
+                        print("  ⚠️  Unique 제약조건이 남아있습니다. 다시 제거 시도...")
+                        # Unique 제약조건 다시 확인 및 제거
+                        cursor.execute("""
+                            SELECT constraint_name 
+                            FROM user_constraints 
+                            WHERE table_name = 'COMPANIES' 
+                            AND constraint_type = 'U'
+                            AND constraint_name IN (
+                                SELECT constraint_name 
+                                FROM user_cons_columns 
+                                WHERE table_name = 'COMPANIES' 
+                                AND column_name = 'COMPANY_CODE'
+                            )
+                        """)
+                        remaining_unique = cursor.fetchall()
+                        for constraint in remaining_unique:
+                            try:
+                                cursor.execute(f'ALTER TABLE "COMPANIES" DROP CONSTRAINT "{constraint[0]}"')
+                                print(f"  - 남은 Unique 제약조건 제거: {constraint[0]}")
+                            except:
+                                pass
+                        # 다시 Primary Key 설정 시도
+                        try:
+                            cursor.execute('ALTER TABLE "COMPANIES" ADD CONSTRAINT "COMPANIES_COMPANY_CODE_PK" PRIMARY KEY ("COMPANY_CODE")')
+                            print("  ✅ company_code를 Primary Key로 설정 완료 (재시도 성공)")
+                        except Exception as retry_error:
+                            print(f"  ❌ Primary Key 설정 실패: {retry_error}")
+                            raise
                     elif 'ORA-02273' in error_str:
                         print("  ⚠️  Foreign Key 참조가 있어 Primary Key 설정 실패")
                         raise
                     else:
-                        print(f"  ⚠️  Primary Key 설정 중 오류 (무시됨): {error_str}")
-            else:
-                print("  ℹ️  company_code가 이미 Primary Key로 설정되어 있습니다")
+                        print(f"  ❌ Primary Key 설정 중 예상치 못한 오류: {error_str}")
+                        raise
+                
+                # 7. 최종 확인: Primary Key가 제대로 설정되었는지 확인
+                cursor.execute("""
+                    SELECT constraint_name 
+                    FROM user_constraints 
+                    WHERE table_name = 'COMPANIES' 
+                    AND constraint_type = 'P'
+                    AND constraint_name IN (
+                        SELECT constraint_name 
+                        FROM user_cons_columns 
+                        WHERE table_name = 'COMPANIES' 
+                        AND column_name = 'COMPANY_CODE'
+                    )
+                """)
+                final_check = cursor.fetchone()
+                if not final_check:
+                    raise Exception("Primary Key 설정이 확인되지 않습니다!")
+                print(f"  ✅ 최종 확인: Primary Key 설정됨 - {final_check[0]}")
                 
         except Exception as e:
-            print(f"⚠️  Primary key 설정 중 오류: {e}")
-            # 오류가 발생해도 계속 진행 (이미 설정되어 있을 수 있음)
             error_str = str(e)
-            if 'ORA-02260' not in error_str and 'ORA-02261' not in error_str and 'ORA-02273' not in error_str:
+            print(f"❌ Primary key 설정 중 오류: {error_str}")
+            # 치명적인 오류만 raise
+            if 'ORA-02273' in error_str:
+                raise Exception(f"Foreign Key 참조 문제로 Primary Key 설정 실패: {error_str}")
+            elif 'ORA-02260' not in error_str and 'ORA-02261' not in error_str:
+                # 예상치 못한 오류는 raise
                 raise
+            else:
+                # 이미 설정되어 있을 수 있으므로 확인 후 진행
+                print("  ⚠️  오류가 발생했지만 이미 설정되어 있을 수 있습니다. 확인 중...")
+                cursor.execute("""
+                    SELECT constraint_name 
+                    FROM user_constraints 
+                    WHERE table_name = 'COMPANIES' 
+                    AND constraint_type = 'P'
+                """)
+                existing_pk = cursor.fetchone()
+                if existing_pk:
+                    print(f"  ℹ️  Primary Key가 존재합니다: {existing_pk[0]}")
+                else:
+                    raise Exception(f"Primary Key 설정 실패: {error_str}")
 
 
 class Migration(migrations.Migration):
