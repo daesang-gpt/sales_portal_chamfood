@@ -115,7 +115,8 @@ def set_company_code_as_primary_key(apps, schema_editor):
         except Exception as e:
             print(f"⚠️  Primary key 설정 중 오류: {e}")
             # 오류가 발생해도 계속 진행 (이미 설정되어 있을 수 있음)
-            if 'ORA-02260' not in str(e) and 'ORA-02273' not in str(e):
+            error_str = str(e)
+            if 'ORA-02260' not in error_str and 'ORA-02261' not in error_str and 'ORA-02273' not in error_str:
                 raise
 
 
