@@ -97,6 +97,13 @@ try:
 except Exception as e:
     print(f"⚠️  시퀀스 삭제 중 오류 (무시 가능): {e}")
 
+# Django 마이그레이션 테이블도 삭제 (있으면)
+try:
+    cursor.execute("DROP TABLE django_migrations CASCADE CONSTRAINTS PURGE")
+    print("✅ Django 마이그레이션 테이블 삭제 완료")
+except Exception as e:
+    print(f"⚠️  Django 마이그레이션 테이블 삭제 중 오류 (무시 가능): {e}")
+
 connection.close()
 print("✅ DB 초기화 완료")
 PYTHON_SCRIPT
@@ -119,14 +126,13 @@ fi
 
 echo ""
 echo "[3/3] 마이그레이션 재생성 및 적용 중..."
-# Django 마이그레이션 테이블 초기화 (필요시)
-python manage.py migrate --fake-initial || true
-
 # 현재 모델 상태로 새 마이그레이션 생성
+echo "새 마이그레이션 파일 생성 중..."
 python manage.py makemigrations myapi
 
-# 마이그레이션 적용
-python manage.py migrate
+# 마이그레이션 적용 (초기 마이그레이션으로 표시)
+echo "마이그레이션 적용 중..."
+python manage.py migrate --run-syncdb
 
 echo ""
 echo "========================================"
