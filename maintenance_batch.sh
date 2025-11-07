@@ -35,34 +35,74 @@ echo "========================================"
 # 1. 디스크 공간 정리
 echo "[1/7] 디스크 공간 정리 중..."
 
-# 1-1. 오래된 백업 디렉토리 삭제 (30일 이상)
+# 1-1. 가장 큰 디렉토리/파일 찾기 및 정리
+echo "  가장 큰 디렉토리 확인 중..."
+LARGEST_DIRS=$(du -sh /opt/sales-portal-backup-* /opt/sales-portal/logs /opt/sales-portal/db_dumps /opt/sales-portal/staticfiles 2>/dev/null | sort -hr | head -5)
+if [ -n "$LARGEST_DIRS" ]; then
+    echo "  큰 디렉토리:"
+    echo "$LARGEST_DIRS" | while read size dir; do
+        echo "    $size $dir"
+    done
+fi
+
+# 1-2. 오래된 백업 디렉토리 삭제 (30일 이상)
 if [ -d "/opt" ]; then
     OLD_BACKUPS=$(find /opt -name "sales-portal-backup-*" -type d -mtime +30 2>/dev/null | wc -l)
     if [ "$OLD_BACKUPS" -gt 0 ]; then
         find /opt -name "sales-portal-backup-*" -type d -mtime +30 -exec rm -rf {} \; 2>/dev/null || true
         echo "  ✅ ${OLD_BACKUPS}개 오래된 백업 디렉토리 삭제 완료"
     fi
+    
+    # 백업 디렉토리가 3개 이상이면 최신 2개만 유지
+    BACKUP_COUNT=$(ls -d /opt/sales-portal-backup-* 2>/dev/null | wc -l)
+    if [ "$BACKUP_COUNT" -gt 2 ]; then
+        cd /opt
+        ls -t sales-portal-backup-* 2>/dev/null | tail -n +3 | xargs rm -rf 2>/dev/null || true
+        echo "  ✅ 백업 디렉토리 정리 완료 (최신 2개만 유지)"
+    fi
 fi
 
-# 1-2. 오래된 로그 파일 삭제 (30일 이상)
+# 1-3. 오래된 로그 파일 삭제 (30일 이상)
 if [ -d "$PROJECT_ROOT/logs" ]; then
     OLD_LOGS=$(find "$PROJECT_ROOT/logs" -name "*.log*" -type f -mtime +30 2>/dev/null | wc -l)
     if [ "$OLD_LOGS" -gt 0 ]; then
         find "$PROJECT_ROOT/logs" -name "*.log*" -type f -mtime +30 -delete 2>/dev/null || true
         echo "  ✅ ${OLD_LOGS}개 오래된 로그 파일 삭제 완료"
     fi
+    
+    # 큰 로그 파일 찾기 및 정리 (100MB 이상)
+    LARGE_LOGS=$(find "$PROJECT_ROOT/logs" -name "*.log" -type f -size +100M 2>/dev/null)
+    if [ -n "$LARGE_LOGS" ]; then
+        echo "$LARGE_LOGS" | while read logfile; do
+            # 파일 크기 확인
+            SIZE=$(du -h "$logfile" | cut -f1)
+            echo "  큰 로그 파일 발견: $logfile (${SIZE})"
+            # 7일 이상 된 큰 로그 파일은 삭제
+            if [ $(find "$logfile" -mtime +7 2>/dev/null | wc -l) -gt 0 ]; then
+                rm -f "$logfile" 2>/dev/null && echo "    ✅ 삭제 완료"
+            fi
+        done
+    fi
 fi
 
-# 1-3. 오래된 DB 덤프 파일 삭제 (30일 이상)
+# 1-4. 오래된 DB 덤프 파일 삭제 (30일 이상)
 if [ -d "$PROJECT_ROOT/db_dumps" ]; then
     OLD_DUMPS=$(find "$PROJECT_ROOT/db_dumps" -name "db_dump_*.json*" -type f -mtime +30 2>/dev/null | wc -l)
     if [ "$OLD_DUMPS" -gt 0 ]; then
         find "$PROJECT_ROOT/db_dumps" -name "db_dump_*.json*" -type f -mtime +30 -delete 2>/dev/null || true
         echo "  ✅ ${OLD_DUMPS}개 오래된 덤프 파일 삭제 완료"
     fi
+    
+    # 덤프 파일이 10개 이상이면 최신 10개만 유지
+    DUMP_COUNT=$(ls -1 "$PROJECT_ROOT/db_dumps"/db_dump_*.json* 2>/dev/null | wc -l)
+    if [ "$DUMP_COUNT" -gt 10 ]; then
+        cd "$PROJECT_ROOT/db_dumps"
+        ls -t db_dump_*.json* 2>/dev/null | tail -n +11 | xargs rm -f 2>/dev/null || true
+        echo "  ✅ 덤프 파일 정리 완료 (최신 10개만 유지)"
+    fi
 fi
 
-# 1-4. Python 캐시 파일 삭제
+# 1-5. Python 캐시 파일 삭제
 PYCACHE_COUNT=$(find "$PROJECT_ROOT" -type d -name __pycache__ 2>/dev/null | wc -l)
 if [ "$PYCACHE_COUNT" -gt 0 ]; then
     find "$PROJECT_ROOT" -type d -name __pycache__ -exec rm -r {} + 2>/dev/null || true
@@ -70,7 +110,9 @@ if [ "$PYCACHE_COUNT" -gt 0 ]; then
     echo "  ✅ Python 캐시 파일 삭제 완료 (${PYCACHE_COUNT}개 디렉토리)"
 fi
 
-echo "✅ 디스크 공간 정리 완료"
+# 1-6. 정리 후 디스크 사용량 확인
+CLEANED_SPACE=$(df -h / | awk 'NR==2 {print $3}')
+echo "✅ 디스크 공간 정리 완료 (현재 사용량: ${CLEANED_SPACE})"
 
 # 2. 만료된 세션 데이터 정리
 echo "[2/7] 만료된 세션 데이터 정리 중..."
@@ -122,16 +164,29 @@ try:
         updated_count = 0
         for table in tables:
             try:
-                # Oracle PL/SQL 블록 실행 (세미콜론 포함)
-                sql = f"BEGIN DBMS_STATS.GATHER_TABLE_STATS(ownname => USER, tabname => '{table}'); END;"
-                cursor.execute(sql)
+                # Oracle PL/SQL 블록 실행 (여러 줄로 분리하여 실행)
+                # Django의 cursor.execute()는 PL/SQL 블록을 여러 줄로 나누어 실행해야 할 수 있음
+                plsql_block = f"""
+                BEGIN
+                    DBMS_STATS.GATHER_TABLE_STATS(
+                        ownname => USER,
+                        tabname => '{table}'
+                    );
+                END;
+                """
+                cursor.execute(plsql_block)
                 updated_count += 1
             except Exception as e:
-                print(f"⚠️  {table} 통계 업데이트 실패: {e}")
+                # 오류 메시지에서 중요한 부분만 추출
+                error_msg = str(e)
+                if 'ORA-' in error_msg:
+                    print(f"⚠️  {table} 통계 업데이트 실패: {error_msg[:100]}")
+                else:
+                    print(f"⚠️  {table} 통계 업데이트 실패 (권한 부족 가능): {error_msg[:100]}")
         if updated_count > 0:
             print(f"✅ {updated_count}개 테이블 통계 업데이트 완료")
         else:
-            print("⚠️  모든 테이블 통계 업데이트 실패 (무시 가능)")
+            print("⚠️  모든 테이블 통계 업데이트 실패 (DB 권한 부족 가능, 무시 가능)")
 except Exception as e:
     print(f"⚠️  DB 통계 업데이트 중 오류: {e}")
 PYEOF
