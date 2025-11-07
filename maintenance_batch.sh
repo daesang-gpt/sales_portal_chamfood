@@ -32,24 +32,55 @@ echo "========================================"
 echo "운영 서버 배치 작업 시작: $(date)"
 echo "========================================"
 
-# 1. 로그 파일 로테이션 (30일 이상 된 로그 삭제)
-echo "[1/6] 오래된 로그 파일 정리 중..."
-if [ -d "$PROJECT_ROOT/logs" ]; then
-    find "$PROJECT_ROOT/logs" -name "*.log" -type f -mtime +30 -delete 2>/dev/null || true
-    echo "✅ 로그 파일 정리 완료"
-else
-    echo "⚠️  로그 디렉토리가 없습니다: $PROJECT_ROOT/logs"
+# 1. 디스크 공간 정리
+echo "[1/7] 디스크 공간 정리 중..."
+
+# 1-1. 오래된 백업 디렉토리 삭제 (30일 이상)
+if [ -d "/opt" ]; then
+    OLD_BACKUPS=$(find /opt -name "sales-portal-backup-*" -type d -mtime +30 2>/dev/null | wc -l)
+    if [ "$OLD_BACKUPS" -gt 0 ]; then
+        find /opt -name "sales-portal-backup-*" -type d -mtime +30 -exec rm -rf {} \; 2>/dev/null || true
+        echo "  ✅ ${OLD_BACKUPS}개 오래된 백업 디렉토리 삭제 완료"
+    fi
 fi
 
+# 1-2. 오래된 로그 파일 삭제 (30일 이상)
+if [ -d "$PROJECT_ROOT/logs" ]; then
+    OLD_LOGS=$(find "$PROJECT_ROOT/logs" -name "*.log*" -type f -mtime +30 2>/dev/null | wc -l)
+    if [ "$OLD_LOGS" -gt 0 ]; then
+        find "$PROJECT_ROOT/logs" -name "*.log*" -type f -mtime +30 -delete 2>/dev/null || true
+        echo "  ✅ ${OLD_LOGS}개 오래된 로그 파일 삭제 완료"
+    fi
+fi
+
+# 1-3. 오래된 DB 덤프 파일 삭제 (30일 이상)
+if [ -d "$PROJECT_ROOT/db_dumps" ]; then
+    OLD_DUMPS=$(find "$PROJECT_ROOT/db_dumps" -name "db_dump_*.json*" -type f -mtime +30 2>/dev/null | wc -l)
+    if [ "$OLD_DUMPS" -gt 0 ]; then
+        find "$PROJECT_ROOT/db_dumps" -name "db_dump_*.json*" -type f -mtime +30 -delete 2>/dev/null || true
+        echo "  ✅ ${OLD_DUMPS}개 오래된 덤프 파일 삭제 완료"
+    fi
+fi
+
+# 1-4. Python 캐시 파일 삭제
+PYCACHE_COUNT=$(find "$PROJECT_ROOT" -type d -name __pycache__ 2>/dev/null | wc -l)
+if [ "$PYCACHE_COUNT" -gt 0 ]; then
+    find "$PROJECT_ROOT" -type d -name __pycache__ -exec rm -r {} + 2>/dev/null || true
+    find "$PROJECT_ROOT" -name "*.pyc" -delete 2>/dev/null || true
+    echo "  ✅ Python 캐시 파일 삭제 완료 (${PYCACHE_COUNT}개 디렉토리)"
+fi
+
+echo "✅ 디스크 공간 정리 완료"
+
 # 2. 만료된 세션 데이터 정리
-echo "[2/6] 만료된 세션 데이터 정리 중..."
+echo "[2/7] 만료된 세션 데이터 정리 중..."
 python manage.py clearsessions 2>/dev/null || {
     echo "⚠️  세션 정리 실패 (정상일 수 있음)"
 }
 echo "✅ 세션 데이터 정리 완료"
 
 # 3. JWT 토큰 블랙리스트 정리 (만료된 토큰)
-echo "[3/6] 만료된 JWT 토큰 정리 중..."
+echo "[3/7] 만료된 JWT 토큰 정리 중..."
 python manage.py shell <<'PYEOF' 2>/dev/null || echo "⚠️  JWT 토큰 정리 실패 (정상일 수 있음)"
 try:
     from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
@@ -73,14 +104,14 @@ except Exception as e:
 PYEOF
 
 # 4. 정적 파일 수집 (변경사항이 있을 경우)
-echo "[4/6] 정적 파일 수집 중..."
+echo "[4/7] 정적 파일 수집 중..."
 python manage.py collectstatic --noinput --clear 2>/dev/null || {
     echo "⚠️  정적 파일 수집 실패 (정상일 수 있음)"
 }
 echo "✅ 정적 파일 수집 완료"
 
 # 5. 데이터베이스 통계 업데이트 (Oracle 성능 최적화)
-echo "[5/6] 데이터베이스 통계 업데이트 중..."
+echo "[5/7] 데이터베이스 통계 업데이트 중..."
 python manage.py shell <<'PYEOF' 2>/dev/null || echo "⚠️  DB 통계 업데이트 실패"
 from django.db import connection
 
@@ -106,11 +137,38 @@ except Exception as e:
 PYEOF
 
 # 6. 디스크 공간 확인 및 경고
-echo "[6/6] 디스크 공간 확인 중..."
+echo "[6/7] 디스크 공간 확인 중..."
 DISK_USAGE=$(df -h / | awk 'NR==2 {print $5}' | sed 's/%//')
 if [ "$DISK_USAGE" -gt 80 ]; then
     echo "⚠️  경고: 디스크 사용량이 ${DISK_USAGE}%입니다!"
-    echo "   오래된 백업 파일이나 로그를 정리하세요."
+    echo "   추가 정리가 필요할 수 있습니다."
+    
+    # 디스크 사용량이 85% 이상이면 더 적극적으로 정리
+    if [ "$DISK_USAGE" -gt 85 ]; then
+        echo "   디스크 사용량이 높아 추가 정리를 진행합니다..."
+        
+        # 최신 2개만 남기고 나머지 백업 삭제
+        if [ -d "/opt" ]; then
+            cd /opt
+            BACKUP_COUNT=$(ls -d sales-portal-backup-* 2>/dev/null | wc -l)
+            if [ "$BACKUP_COUNT" -gt 2 ]; then
+                ls -t sales-portal-backup-* 2>/dev/null | tail -n +3 | xargs rm -rf 2>/dev/null || true
+                echo "  ✅ 추가 백업 디렉토리 정리 완료"
+            fi
+        fi
+        
+        # 15일 이상 된 로그 파일 삭제 (더 적극적)
+        if [ -d "$PROJECT_ROOT/logs" ]; then
+            find "$PROJECT_ROOT/logs" -name "*.log*" -type f -mtime +15 -delete 2>/dev/null || true
+            echo "  ✅ 추가 로그 파일 정리 완료 (15일 이상)"
+        fi
+        
+        # 15일 이상 된 덤프 파일 삭제 (더 적극적)
+        if [ -d "$PROJECT_ROOT/db_dumps" ]; then
+            find "$PROJECT_ROOT/db_dumps" -name "db_dump_*.json*" -type f -mtime +15 -delete 2>/dev/null || true
+            echo "  ✅ 추가 덤프 파일 정리 완료 (15일 이상)"
+        fi
+    fi
 else
     echo "✅ 디스크 사용량: ${DISK_USAGE}% (정상)"
 fi
