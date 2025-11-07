@@ -197,6 +197,18 @@ def set_company_code_as_primary_key(apps, schema_editor):
                     raise Exception(f"Primary Key 설정 실패: {error_str}")
 
 
+# 커스텀 AlterField 클래스: 실제 DB 변경을 스킵하고 모델 상태만 업데이트
+class NoOpAlterField(migrations.AlterField):
+    """DB 변경 없이 모델 상태만 업데이트하는 AlterField"""
+    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+        # DB 변경을 하지 않음 (RunPython에서 이미 처리됨)
+        pass
+    
+    def database_backwards(self, app_label, schema_editor, from_state, to_state):
+        # DB 변경을 하지 않음
+        pass
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -210,8 +222,8 @@ class Migration(migrations.Migration):
             reverse_code=migrations.RunPython.noop
         ),
         # Django 모델 상태만 업데이트 (데이터베이스는 이미 RunPython에서 처리됨)
-        # 주의: AlterField는 실제로 DB 변경을 시도하지 않도록 주의
-        migrations.AlterField(
+        # NoOpAlterField를 사용하여 실제 DB 변경을 스킵
+        NoOpAlterField(
             model_name='company',
             name='company_code',
             field=models.CharField(max_length=50, primary_key=True, serialize=False, unique=True, verbose_name='회사코드'),
