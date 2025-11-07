@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { ArrowLeft, Loader2, User } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { getUserFromToken, isAdmin } from "@/lib/auth"
+import { getApiBaseUrl } from "@/lib/api"
 
 type UserType = {
   id: number
@@ -40,19 +41,31 @@ export default function UsersManagementPage() {
       setLoading(true)
       setError(null)
       
-      // 환경에 따른 API URL 설정
-      const apiBaseUrl = 'http://127.0.0.1:8000/api'
-      
-      const res = await fetch(`${apiBaseUrl}/users/`)
-      if (res.ok) {
-        const data = await res.json()
-        setUsers(data)
-      } else {
-        setError('사용자 목록을 불러오는데 실패했습니다.')
+      const apiBaseUrl = getApiBaseUrl()
+      const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
+
+      const res = await fetch(`${apiBaseUrl}/users/`, {
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      })
+
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => '')
+        console.error('사용자 목록 API 응답 오류:', res.status, errorText)
+        throw new Error('사용자 목록을 불러오는데 실패했습니다.')
       }
+
+      const data = await res.json()
+      if (!Array.isArray(data)) {
+        console.error('사용자 목록 API 응답 형식 오류:', data)
+        throw new Error('사용자 목록 응답 형식이 올바르지 않습니다.')
+      }
+
+      setUsers(data)
     } catch (err) {
       console.error('사용자 목록 불러오기 실패:', err)
-      setError('사용자 목록을 불러오는데 실패했습니다.')
+      setError(err instanceof Error ? err.message : '사용자 목록을 불러오는데 실패했습니다.')
     } finally {
       setLoading(false)
     }

@@ -7,25 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-
-// 환경에 따른 API URL 설정
-const getApiBaseUrl = () => {
-  if (typeof window !== 'undefined') {
-    const hostname = window.location.hostname;
-    const port = window.location.port;
-    
-    if (hostname === 'localhost' || 
-        hostname === '127.0.0.1' || 
-        hostname.startsWith('172.28.') || 
-        port === '3000') {
-      return 'http://127.0.0.1:8000';
-    }
-    
-    return 'http://192.168.99.37:8000';
-  }
-  
-  return 'http://127.0.0.1:8000';
-};
+import { getApiBaseUrl } from '@/lib/api';
 
 interface ChangePasswordResponse {
   success: boolean;
@@ -74,15 +56,20 @@ export default function ChangePasswordPage() {
     }
 
     try {
-      const apiUrl = `${getApiBaseUrl()}/api/change-password/`;
+      const apiUrl = `${getApiBaseUrl()}/change-password/`;
       const accessToken = localStorage.getItem('access_token');
-      
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+
       const response = await fetch(apiUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`,
-        },
+        headers,
         body: JSON.stringify({
           current_password: currentPassword,
           new_password: newPassword,
