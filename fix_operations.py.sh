@@ -50,8 +50,9 @@ try:
         while i < len(lines):
             line = lines[i]
             
-            # isinstance(value, Database.Timestamp) 패턴 찾기
-            if 'isinstance(value, Database.Timestamp)' in line and '#' not in line:
+            # isinstance(value, Database.Timestamp) 또는 hasattr 패턴 찾기
+            if ('isinstance(value, Database.Timestamp)' in line or 
+                ('hasattr(Database, "Timestamp")' in line and 'isinstance(value, Database.Timestamp)' in line)) and '#' not in line:
                 indent = len(line) - len(line.lstrip())
                 print(f"[3] 패턴 발견 (라인 {i+1}): {line.strip()}")
                 
@@ -80,27 +81,93 @@ try:
                     # i는 이미 증가했으므로 continue로 넘어감
                     continue
             
+            # hasattr만 있는 경우도 처리 (이전 패치에서 추가된 것)
+            if 'hasattr(Database, "Timestamp")' in line and 'isinstance' in line and '#' not in line:
+                indent = len(line) - len(line.lstrip())
+                print(f"[3] hasattr 패턴 발견 (라인 {i+1}): {line.strip()}")
+                
+                # 원래 라인 주석 처리
+                new_lines.append(' ' * indent + '# oracledb 호환성: Database.Timestamp 체크 주석 처리')
+                new_lines.append(' ' * indent + '# ' + line.lstrip())
+                
+                # 다음 줄들 확인 (if 블록 내부 및 except 블록까지)
+                i += 1
+                if i < len(lines):
+                    # if 블록 내부 코드와 except 블록 찾기
+                    while i < len(lines):
+                        current_line = lines[i]
+                        current_indent = len(current_line) - len(current_line.lstrip())
+                        
+                        # except 블록도 함께 주석 처리
+                        if 'except (TypeError, AttributeError):' in current_line:
+                            new_lines.append(' ' * indent + '# ' + current_line.lstrip())
+                            i += 1
+                            # except 블록 내부도 주석 처리
+                            if i < len(lines):
+                                except_indent = len(current_line) - len(current_line.lstrip())
+                                while i < len(lines):
+                                    except_line = lines[i]
+                                    except_line_indent = len(except_line) - len(except_line.lstrip())
+                                    if except_line.strip() and except_line_indent <= except_indent:
+                                        break
+                                    if except_line.strip():
+                                        new_lines.append(' ' * indent + '# ' + except_line.lstrip())
+                                    else:
+                                        new_lines.append(except_line)
+                                    i += 1
+                            break
+                        
+                        # 같은 들여쓰기 레벨이면 if 블록 종료
+                        if current_line.strip() and current_indent <= indent:
+                            break
+                        
+                        # 내부 코드 주석 처리
+                        if current_line.strip():
+                            new_lines.append(' ' * indent + '# ' + current_line.lstrip())
+                        else:
+                            new_lines.append(current_line)
+                        i += 1
+                    continue
+            
             # 잘못된 except 블록 제거 (try 블록 없이 except만 있는 경우)
             if 'except (TypeError, AttributeError):' in line and '#' not in line:
                 indent = len(line) - len(line.lstrip())
                 # 이전 몇 줄 확인하여 try 블록이 있는지 확인
                 has_try = False
-                for j in range(max(0, len(new_lines)-5), len(new_lines)):
-                    if 'try:' in new_lines[j] and len(new_lines[j]) - len(new_lines[j].lstrip()) == indent:
-                        has_try = True
-                        break
+                for j in range(max(0, len(new_lines)-10), len(new_lines)):
+                    if j < len(new_lines):
+                        prev_line = new_lines[j]
+                        prev_indent = len(prev_line) - len(prev_line.lstrip())
+                        if 'try:' in prev_line and prev_indent == indent:
+                            has_try = True
+                            break
+                        # 주석 처리된 if 블록 다음에 오는 except도 처리
+                        if '# oracledb 호환성: Database.Timestamp 체크 주석 처리' in prev_line:
+                            has_try = False  # 주석 처리된 블록 다음이므로 except도 주석 처리 필요
+                            break
                 
                 if not has_try:
                     # try 블록이 없으면 except 블록 주석 처리
+                    print(f"[4] 잘못된 except 블록 발견 (라인 {i+1}): {line.strip()}")
                     new_lines.append(' ' * indent + '# oracledb 호환성: 잘못된 except 블록 제거')
                     new_lines.append(' ' * indent + '# ' + line.lstrip())
                     # 다음 pass나 주석도 주석 처리
                     i += 1
                     if i < len(lines):
                         next_line = lines[i]
-                        if 'pass' in next_line or next_line.strip().startswith('#'):
-                            new_lines.append(' ' * indent + '# ' + next_line.lstrip())
+                        next_indent = len(next_line) - len(next_line.lstrip())
+                        # except 블록 내부 코드 주석 처리
+                        while i < len(lines) and (next_indent > indent or not next_line.strip()):
+                            if next_line.strip():
+                                new_lines.append(' ' * indent + '# ' + next_line.lstrip())
+                            else:
+                                new_lines.append(next_line)
                             i += 1
+                            if i < len(lines):
+                                next_line = lines[i]
+                                next_indent = len(next_line) - len(next_line.lstrip())
+                            else:
+                                break
                     continue
             
             new_lines.append(line)
