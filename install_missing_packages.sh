@@ -38,6 +38,7 @@ pip install scikit-learn>=1.1.0
 # 기타 누락 패키지들
 echo "기타 패키지들 설치 중..."
 pip install requests>=2.28.0
+pip install bcrypt>=4.0.0
 
 echo "=== 3. 설치된 패키지 확인 ==="
 pip list | grep -E "(keybert|sentence-transformers|torch|numpy|scikit-learn)"
