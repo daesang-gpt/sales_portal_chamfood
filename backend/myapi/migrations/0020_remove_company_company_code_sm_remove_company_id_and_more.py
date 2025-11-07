@@ -14,6 +14,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='report',
             name='company_code',
-            field=models.ForeignKey(blank=True, db_column='company_code', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='reports_by_code', to='myapi.company', verbose_name='회사코드'),
+            # Company 모델의 Primary Key가 company_code로 변경되었으므로 to_field 명시
+            field=models.ForeignKey(blank=True, db_column='company_code', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='reports_by_code', to='myapi.company', to_field='company_code', verbose_name='회사코드'),
         ),
     ]
