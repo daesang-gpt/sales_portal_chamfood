@@ -1,13 +1,23 @@
 #!/bin/bash
 
 # 운영서버 시작 전 사전 준비사항 확인 스크립트
-# 사용법: ./check_prerequisites.sh
+# 사용법: 
+#   ./check_prerequisites.sh          # 확인만 수행
+#   ./check_prerequisites.sh --fix     # 확인 후 자동으로 실행 권한 부여
 
 set -e
 
 PROJECT_ROOT="/opt/sales-portal"
 ERRORS=0
 WARNINGS=0
+AUTO_FIX=false
+
+# --fix 옵션 확인
+if [ "$1" == "--fix" ] || [ "$1" == "-f" ]; then
+    AUTO_FIX=true
+    echo "자동 수정 모드: 실행 권한이 없는 스크립트에 자동으로 권한을 부여합니다."
+    echo ""
+fi
 
 echo "========================================"
 echo "사전 준비사항 확인 시작"
@@ -196,7 +206,8 @@ fi
 
 # 10. 실행 스크립트 확인
 echo "[10/10] 실행 스크립트 확인..."
-SCRIPTS=("start_backend_daemon.sh" "start_frontend_daemon.sh" "start_all_daemon.sh" "stop_backend.sh" "stop_frontend.sh" "stop_all.sh" "status.sh")
+SCRIPTS=("start_backend_daemon.sh" "start_frontend_daemon.sh" "start_all_daemon.sh" "stop_backend.sh" "stop_frontend.sh" "stop_all.sh" "status.sh" "check_prerequisites.sh")
+MISSING_PERMISSIONS=()
 
 for script in "${SCRIPTS[@]}"; do
     if [ -f "$PROJECT_ROOT/$script" ]; then
@@ -205,11 +216,22 @@ for script in "${SCRIPTS[@]}"; do
         else
             check_warn "$script 실행 권한이 없습니다"
             echo "   실행 권한 부여: chmod +x $PROJECT_ROOT/$script"
+            MISSING_PERMISSIONS+=("$PROJECT_ROOT/$script")
         fi
     else
         check_warn "$script 파일이 없습니다"
     fi
 done
+
+# 자동 수정 모드인 경우 실행 권한 부여
+if [ "$AUTO_FIX" = true ] && [ ${#MISSING_PERMISSIONS[@]} -gt 0 ]; then
+    echo ""
+    echo "자동 수정 중..."
+    for script in "${MISSING_PERMISSIONS[@]}"; do
+        chmod +x "$script" 2>/dev/null && echo -e "${GREEN}✅${NC} $script 실행 권한 부여 완료" || echo -e "${RED}❌${NC} $script 실행 권한 부여 실패"
+    done
+    echo ""
+fi
 
 # 로그 디렉토리 확인
 echo ""
@@ -235,6 +257,18 @@ if [ $ERRORS -eq 0 ] && [ $WARNINGS -eq 0 ]; then
     exit 0
 elif [ $ERRORS -eq 0 ]; then
     echo -e "${YELLOW}⚠️  경고가 $WARNINGS개 있습니다.${NC}"
+    echo ""
+    
+    # 실행 권한 경고가 있는 경우 특별 안내
+    if [ ${#MISSING_PERMISSIONS[@]} -gt 0 ]; then
+        echo "주요 경고: 실행 권한이 없는 스크립트가 있습니다."
+        echo ""
+        echo "해결 방법:"
+        echo "  1. 자동 수정: ./check_prerequisites.sh --fix"
+        echo "  2. 수동 수정: chmod +x *.sh"
+        echo ""
+    fi
+    
     echo "대부분의 경우 서버를 시작할 수 있지만, 경고 사항을 확인하세요."
     echo "서버 시작: ./start_all_daemon.sh"
     exit 0

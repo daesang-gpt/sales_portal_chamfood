@@ -26,7 +26,11 @@
 ```bash
 # 사전 준비사항 자동 확인 스크립트 실행
 cd /opt/sales-portal
+chmod +x check_prerequisites.sh  # 최초 1회만
 ./check_prerequisites.sh
+
+# 경고사항이 있으면 자동 수정 (실행 권한 부여 등)
+./check_prerequisites.sh --fix
 ```
 
 ---
@@ -51,8 +55,11 @@ cd /opt/sales-portal
 ### 2단계: 실행 권한 부여 (최초 1회만)
 
 ```bash
-# 모든 스크립트에 실행 권한 부여
+# 방법 1: 모든 스크립트에 실행 권한 부여 (권장)
 chmod +x *.sh
+
+# 방법 2: check_prerequisites.sh의 자동 수정 기능 사용
+./check_prerequisites.sh --fix
 
 # 확인
 ls -l *.sh
@@ -60,14 +67,26 @@ ls -l *.sh
 
 **예상 결과**: 모든 `.sh` 파일에 `x` 권한이 부여됩니다.
 
+**참고**: `check_prerequisites.sh`를 실행했을 때 실행 권한 경고가 나오면, `--fix` 옵션을 사용하여 자동으로 권한을 부여할 수 있습니다.
+
 ### 3단계: 사전 준비사항 확인
 
 ```bash
 # 자동 확인 스크립트 실행
 ./check_prerequisites.sh
+
+# 경고사항이 있으면 자동 수정 (실행 권한 부여 등)
+./check_prerequisites.sh --fix
 ```
 
-**예상 결과**: 모든 확인 항목이 통과되어야 합니다. 실패 항목이 있으면 먼저 해결하세요.
+**예상 결과**: 
+- 모든 확인 항목이 통과되어야 합니다. 
+- 경고사항이 있으면 `--fix` 옵션으로 자동 수정하거나 수동으로 해결하세요.
+- 오류가 있으면 반드시 해결한 후 진행하세요.
+
+**경고사항 해석**:
+- ⚠️ **ORACLE_HOME 환경변수 경고**: 스크립트에서 자동으로 설정되므로 무시해도 됩니다.
+- ⚠️ **실행 권한 경고**: `./check_prerequisites.sh --fix` 또는 `chmod +x *.sh`로 해결하세요.
 
 ### 4단계: 기존 서버 중지 (실행 중인 경우)
 
@@ -607,6 +626,42 @@ du -sh .next
 
 ## 🆘 문제 해결
 
+### check_prerequisites.sh 경고사항 해결
+
+#### 실행 권한 경고 해결
+
+`check_prerequisites.sh` 실행 시 다음과 같은 경고가 나오는 경우:
+
+```
+⚠️ start_backend_daemon.sh 실행 권한이 없습니다
+⚠️ start_frontend_daemon.sh 실행 권한이 없습니다
+...
+```
+
+**해결 방법**:
+
+```bash
+# 방법 1: 자동 수정 (권장)
+./check_prerequisites.sh --fix
+
+# 방법 2: 수동 수정
+chmod +x *.sh
+
+# 확인
+./check_prerequisites.sh
+```
+
+#### ORACLE_HOME 환경변수 경고
+
+다음 경고는 무시해도 됩니다:
+
+```
+⚠️ ORACLE_HOME 환경변수가 설정되어 있지 않습니다
+   스크립트에서 자동으로 설정됩니다
+```
+
+이 경고는 정상입니다. 실행 스크립트(`start_backend_daemon.sh` 등)에서 자동으로 Oracle 환경변수를 설정하므로, 미리 설정하지 않아도 됩니다.
+
 ### 서버가 시작되지 않는 경우
 
 #### 1. 포트가 이미 사용 중인지 확인
@@ -750,6 +805,12 @@ pip install -r requirements.txt
 ### 자주 사용하는 명령어
 
 ```bash
+# 사전 준비사항 확인
+./check_prerequisites.sh
+
+# 경고사항 자동 수정
+./check_prerequisites.sh --fix
+
 # 상태 확인
 ./status.sh
 
