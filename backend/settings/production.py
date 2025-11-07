@@ -31,7 +31,8 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = 'DENY'
 
 # Static files 설정 (운영용)
-STATIC_ROOT = str(BASE_DIR / 'staticfiles')
+# BASE_DIR이 Path 객체이므로 명시적으로 절대 경로 문자열로 변환
+STATIC_ROOT = os.path.abspath(os.path.join(str(BASE_DIR), 'staticfiles'))
 
 # 로깅 설정 (운영용)
 # 로그 디렉토리 생성 (없으면 자동 생성)
