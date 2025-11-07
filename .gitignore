@@ -10,9 +10,10 @@ dist/
 downloads/
 eggs/
 .eggs/
+# Python lib directories (frontend/lib은 제외)
 lib/
+!frontend/lib/
 lib64/
-!frontend/lib/  # frontend/lib은 제외 (Next.js 프로젝트에 필요)
 parts/
 sdist/
 var/

@@ -97,41 +97,19 @@ try:
 except Exception as e:
     print(f"⚠️  시퀀스 삭제 중 오류 (무시 가능): {e}")
 
-# Django 마이그레이션 테이블도 삭제 (있으면)
-try:
-    cursor.execute("DROP TABLE django_migrations CASCADE CONSTRAINTS PURGE")
-    print("✅ Django 마이그레이션 테이블 삭제 완료")
-except Exception as e:
-    print(f"⚠️  Django 마이그레이션 테이블 삭제 중 오류 (무시 가능): {e}")
-
 connection.close()
 print("✅ DB 초기화 완료")
 PYTHON_SCRIPT
 
 echo ""
-echo "[2/3] 마이그레이션 파일 백업 및 초기화..."
-# 기존 마이그레이션 파일 백업 (필요시 참고용)
-if [ -d "myapi/migrations" ]; then
-    MIGRATIONS_BACKUP="myapi/migrations_backup_$(date +%Y%m%d_%H%M%S)"
-    mkdir -p "$MIGRATIONS_BACKUP"
-    cp -r myapi/migrations/* "$MIGRATIONS_BACKUP/" 2>/dev/null || true
-    echo "기존 마이그레이션 파일 백업: $MIGRATIONS_BACKUP"
-    
-    # 마이그레이션 파일 삭제 (__init__.py 제외)
-    find myapi/migrations -name "*.py" ! -name "__init__.py" -delete 2>/dev/null || true
-    find myapi/migrations -name "*.pyc" -delete 2>/dev/null || true
-    find myapi/migrations -name "__pycache__" -type d -exec rm -r {} + 2>/dev/null || true
-    echo "✅ 기존 마이그레이션 파일 삭제 완료"
-fi
+echo "[2/3] 마이그레이션 파일 삭제 (migrations 디렉토리 제외)..."
+# migrations 디렉토리는 유지하되, __pycache__만 삭제
+find myapi/migrations -name "*.pyc" -delete 2>/dev/null || true
+find myapi/migrations -name "__pycache__" -type d -exec rm -r {} + 2>/dev/null || true
 
 echo ""
 echo "[3/3] 마이그레이션 재생성 및 적용 중..."
-# 현재 모델 상태로 새 마이그레이션 생성
-echo "새 마이그레이션 파일 생성 중..."
-python manage.py makemigrations myapi
-
-# 마이그레이션 적용 (초기 마이그레이션으로 표시)
-echo "마이그레이션 적용 중..."
+# 마이그레이션 파일은 그대로 두고 migrate 실행
 python manage.py migrate --run-syncdb
 
 echo ""
