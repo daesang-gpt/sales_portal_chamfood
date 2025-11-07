@@ -85,7 +85,7 @@ ls -l *.sh
 - 오류가 있으면 반드시 해결한 후 진행하세요.
 
 **경고사항 해석**:
-- ⚠️ **ORACLE_HOME 환경변수 경고**: 스크립트에서 자동으로 설정되므로 무시해도 됩니다.
+- ℹ️ **ORACLE_HOME 환경변수 정보**: 경로가 존재하면 정보 메시지로 표시됩니다. 스크립트에서 자동 설정되므로 무시해도 됩니다.
 - ⚠️ **실행 권한 경고**: `./check_prerequisites.sh --fix` 또는 `chmod +x *.sh`로 해결하세요.
 
 ### 4단계: 기존 서버 중지 (실행 중인 경우)
@@ -651,16 +651,33 @@ chmod +x *.sh
 ./check_prerequisites.sh
 ```
 
-#### ORACLE_HOME 환경변수 경고
+#### ORACLE_HOME 환경변수 정보
 
-다음 경고는 무시해도 됩니다:
+다음 메시지는 경고가 아닙니다:
 
 ```
-⚠️ ORACLE_HOME 환경변수가 설정되어 있지 않습니다
-   스크립트에서 자동으로 설정됩니다
+ℹ️ ORACLE_HOME 환경변수가 설정되지 않았지만, 스크립트에서 자동으로 설정됩니다
+   사용할 경로: /u01/app/oracle/product/19c/db_1
+   (경고가 아닙니다. 정상 동작합니다)
 ```
 
-이 경고는 정상입니다. 실행 스크립트(`start_backend_daemon.sh` 등)에서 자동으로 Oracle 환경변수를 설정하므로, 미리 설정하지 않아도 됩니다.
+이 메시지는 정상입니다. 실행 스크립트(`start_backend_daemon.sh` 등)에서 자동으로 Oracle 환경변수를 설정하므로, 미리 설정하지 않아도 됩니다.
+
+**선택사항: 영구적으로 환경변수 설정하기**
+
+편의를 위해 시스템에 영구적으로 설정하려면:
+
+```bash
+# root 사용자의 .bashrc에 추가
+echo 'export ORACLE_HOME=/u01/app/oracle/product/19c/db_1' >> /root/.bashrc
+echo 'export LD_LIBRARY_PATH=$ORACLE_HOME/lib:$LD_LIBRARY_PATH' >> /root/.bashrc
+echo 'export PATH=$ORACLE_HOME/bin:$PATH' >> /root/.bashrc
+
+# 적용
+source /root/.bashrc
+```
+
+**참고**: 영구 설정은 선택사항입니다. 스크립트가 자동으로 설정하므로 필수는 아닙니다.
 
 ### 서버가 시작되지 않는 경우
 

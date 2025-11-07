@@ -159,6 +159,8 @@ fi
 
 # 8. Oracle 환경변수 확인
 echo "[8/10] Oracle 환경변수 확인..."
+ORACLE_HOME_PATH="/u01/app/oracle/product/19c/db_1"
+
 if [ -n "$ORACLE_HOME" ]; then
     check_pass "ORACLE_HOME 설정됨: $ORACLE_HOME"
     if [ -d "$ORACLE_HOME" ]; then
@@ -167,8 +169,16 @@ if [ -n "$ORACLE_HOME" ]; then
         check_warn "ORACLE_HOME 디렉토리가 존재하지 않습니다: $ORACLE_HOME"
     fi
 else
-    check_warn "ORACLE_HOME 환경변수가 설정되어 있지 않습니다"
-    echo "   스크립트에서 자동으로 설정됩니다"
+    # ORACLE_HOME이 설정되지 않았지만, 스크립트에서 사용할 경로가 존재하는지 확인
+    if [ -d "$ORACLE_HOME_PATH" ]; then
+        echo -e "${GREEN}ℹ️${NC} ORACLE_HOME 환경변수가 설정되지 않았지만, 스크립트에서 자동으로 설정됩니다"
+        echo "   사용할 경로: $ORACLE_HOME_PATH"
+        echo "   (경고가 아닙니다. 정상 동작합니다)"
+    else
+        check_warn "ORACLE_HOME 환경변수가 설정되어 있지 않고, 기본 경로도 존재하지 않습니다"
+        echo "   예상 경로: $ORACLE_HOME_PATH"
+        echo "   스크립트에서 자동으로 설정되지만, 경로가 올바른지 확인하세요"
+    fi
 fi
 
 # 9. 데이터베이스 연결 확인
