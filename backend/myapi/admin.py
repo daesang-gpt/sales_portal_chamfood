@@ -1,17 +1,56 @@
 from django.contrib import admin, messages
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from django.contrib.auth.forms import AdminPasswordChangeForm
+from django.contrib.auth.forms import AdminPasswordChangeForm, UserChangeForm
+from django import forms
 from django.utils.translation import gettext_lazy as _
 from django.utils.html import escape
 from django.urls import reverse
 from django.http import Http404, HttpResponseRedirect
 from django.template.response import TemplateResponse
+from django.contrib.auth.hashers import make_password
 from .models import Company, Report, User, CompanyFinancialStatus
 
 # Register your models here.
 
+class UserAdminForm(UserChangeForm):
+    """사용자 편집 폼 - 비밀번호 필드 추가"""
+    new_password = forms.CharField(
+        label='새 비밀번호',
+        required=False,
+        widget=forms.PasswordInput(attrs={'class': 'vTextField'}),
+        help_text='비밀번호를 변경하려면 새 비밀번호를 입력하세요. 비워두면 변경되지 않습니다.'
+    )
+    confirm_password = forms.CharField(
+        label='새 비밀번호 확인',
+        required=False,
+        widget=forms.PasswordInput(attrs={'class': 'vTextField'}),
+        help_text='새 비밀번호를 다시 입력하세요.'
+    )
+    
+    class Meta:
+        model = User
+        fields = '__all__'
+    
+    def clean(self):
+        cleaned_data = super().clean()
+        new_password = cleaned_data.get('new_password')
+        confirm_password = cleaned_data.get('confirm_password')
+        
+        if new_password or confirm_password:
+            if new_password != confirm_password:
+                raise forms.ValidationError({
+                    'confirm_password': '새 비밀번호가 일치하지 않습니다.'
+                })
+            if len(new_password) < 8:
+                raise forms.ValidationError({
+                    'new_password': '비밀번호는 최소 8자 이상이어야 합니다.'
+                })
+        
+        return cleaned_data
+
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
+    form = UserAdminForm
     list_display = ['id', 'username', 'name', 'email', 'department', 'employee_number', 'role', 'is_password_changed']
     list_filter = ['role', 'department', 'is_password_changed']
     search_fields = ['id', 'username', 'name', 'email', 'employee_number']
@@ -27,6 +66,10 @@ class UserAdmin(BaseUserAdmin):
         }),
         ('권한', {
             'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')
+        }),
+        ('비밀번호 변경', {
+            'fields': ('new_password', 'confirm_password'),
+            'description': '비밀번호를 변경하려면 새 비밀번호를 입력하세요. 이전 비밀번호 확인이 필요하지 않습니다.'
         }),
         ('비밀번호 정보', {
             'fields': ('is_password_changed',)
@@ -47,9 +90,16 @@ class UserAdmin(BaseUserAdmin):
     
     def save_model(self, request, obj, form, change):
         """
-        사용자 저장 시 처리
-        비밀번호는 user_change_password 메서드에서 별도로 처리됨
+        사용자 저장 시 비밀번호 변경 처리
         """
+        # 새 비밀번호가 입력된 경우 처리
+        if change and form.cleaned_data.get('new_password'):
+            new_password = form.cleaned_data['new_password']
+            # 비밀번호를 해시하여 저장
+            obj.password = make_password(new_password)
+            # 비밀번호가 변경되었으므로 is_password_changed를 False로 설정
+            obj.is_password_changed = False
+        
         # Django가 자동으로 비밀번호를 해시하여 저장함
         super().save_model(request, obj, form, change)
     
