@@ -133,6 +133,12 @@ if [ "$TABLE_EXISTS" = "0" ] || [ -z "$TABLE_EXISTS" ]; then
     echo "테이블이 없습니다. --run-syncdb로 스키마 생성 중..."
     # 테이블이 없으면 --run-syncdb로 현재 모델 상태로 테이블 생성
     python manage.py migrate --run-syncdb
+    
+    # 모든 마이그레이션을 fake로 표시 (테이블은 이미 생성되었으므로)
+    echo "마이그레이션 이력을 fake로 표시 중..."
+    python manage.py migrate --fake || {
+        echo "⚠️  마이그레이션 fake 실패. 수동으로 처리해야 할 수 있습니다."
+    }
 else
     echo "테이블이 존재합니다. 마이그레이션 적용 중..."
     # 테이블이 있으면 --fake-initial로 마이그레이션 적용
