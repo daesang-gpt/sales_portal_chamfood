@@ -124,7 +124,7 @@ python manage.py migrate --fake-initial
 
 # 7. 데이터베이스 복원 (덤프 파일이 있는 경우)
 echo ""
-echo "[7/7] 데이터베이스 복원 확인 중..."
+echo "[7/8] 데이터베이스 복원 확인 중..."
 cd $DEPLOY_DIR
 
 # 가장 최근 덤프 파일 찾기
@@ -146,6 +146,36 @@ else
     echo "덤프 파일을 찾을 수 없습니다. 데이터 복원을 건너뜁니다."
 fi
 
+# 8. Cron 작업 등록
+echo ""
+echo "[8/8] Cron 작업 등록 중..."
+cd $DEPLOY_DIR/backend
+source venv/bin/activate
+
+# 환경변수 설정
+export DJANGO_SETTINGS_MODULE=settings.production
+export DB_NAME=192.168.99.37:1521/XEPDB1
+export DB_USER=salesportal
+export DB_PASSWORD=salesportal123
+
+# Django crontab 등록 (고객 구분 자동 업데이트)
+echo "Django crontab 등록 중..."
+python manage.py crontab add 2>/dev/null || {
+    echo "⚠️  Django crontab 등록 실패 (이미 등록되어 있을 수 있음)"
+    echo "   기존 crontab 확인: python manage.py crontab show"
+}
+
+# 배치 작업 스크립트에 실행 권한 부여
+if [ -f "$DEPLOY_DIR/maintenance_batch.sh" ]; then
+    chmod +x "$DEPLOY_DIR/maintenance_batch.sh"
+    echo "✅ maintenance_batch.sh 실행 권한 설정 완료"
+fi
+
+if [ -f "$DEPLOY_DIR/backup_db.sh" ]; then
+    chmod +x "$DEPLOY_DIR/backup_db.sh"
+    echo "✅ backup_db.sh 실행 권한 설정 완료"
+fi
+
 echo ""
 echo "========================================"
 echo "✅ 배포 완료!"
@@ -161,5 +191,27 @@ echo "  nohup python manage.py runserver 0.0.0.0:8000 > backend.log 2>&1 &"
 echo ""
 echo "  cd $DEPLOY_DIR/frontend"
 echo "  nohup npm start > frontend.log 2>&1 &"
+echo ""
+echo "========================================"
+echo "Cron 작업 설정 안내"
+echo "========================================"
+echo ""
+echo "다음 명령어로 시스템 crontab에 배치 작업을 추가하세요:"
+echo ""
+echo "  crontab -e"
+echo ""
+echo "다음 줄들을 추가하세요:"
+echo ""
+echo "  # 매일 새벽 3시: 배치 작업 실행"
+echo "  0 3 * * * $DEPLOY_DIR/maintenance_batch.sh >> $DEPLOY_DIR/logs/maintenance.log 2>&1"
+echo ""
+echo "  # 매일 새벽 4시: 데이터베이스 백업"
+echo "  0 4 * * * $DEPLOY_DIR/backup_db.sh >> $DEPLOY_DIR/logs/backup.log 2>&1"
+echo ""
+echo "로그 로테이션 설정:"
+echo "  sudo cp $DEPLOY_DIR/logrotate_sales_portal.conf /etc/logrotate.d/sales-portal"
+echo "  sudo chmod 644 /etc/logrotate.d/sales-portal"
+echo ""
+echo "자세한 내용은 OPERATIONS_GUIDE.md를 참조하세요."
 echo ""
 
