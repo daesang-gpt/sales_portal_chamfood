@@ -57,7 +57,10 @@ echo ""
 echo "[4.5/7] Django Oracle 백엔드 패치 중..."
 if [ -f "$DEPLOY_DIR/patch_django_oracle.sh" ]; then
     chmod +x $DEPLOY_DIR/patch_django_oracle.sh
-    $DEPLOY_DIR/patch_django_oracle.sh
+    bash $DEPLOY_DIR/patch_django_oracle.sh || {
+        echo "⚠️  패치 스크립트 실행 실패. 수동 패치가 필요할 수 있습니다."
+        echo "   Django Oracle 백엔드 파일을 직접 수정해주세요."
+    }
 else
     echo "⚠️  patch_django_oracle.sh 파일을 찾을 수 없습니다. 수동으로 패치가 필요할 수 있습니다."
 fi
