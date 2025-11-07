@@ -18,16 +18,27 @@ BACKUP_DIR="/opt/sales-portal-backup-$(date +%Y%m%d_%H%M%S)"
 if [ -d "$DEPLOY_DIR" ]; then
     echo ""
     echo "[1/7] 기존 배포 백업 확인 중..."
-    # 디스크 공간 확인 (GB 단위)
-    AVAILABLE_SPACE=$(df -BG $DEPLOY_DIR | tail -1 | awk '{print $4}' | sed 's/G//')
-    if [ "$AVAILABLE_SPACE" -gt 5 ]; then
+    # 디스크 공간 확인 (GB 단위, 루트 파티션)
+    AVAILABLE_SPACE=$(df -BG / | tail -1 | awk '{print $4}' | sed 's/G//')
+    # 백업 디렉토리 정리 (오래된 백업 삭제)
+    if [ -d "/opt" ]; then
+        echo "오래된 백업 파일 정리 중..."
+        # 최신 2개만 남기고 나머지 삭제
+        cd /opt
+        ls -t sales-portal-backup-* 2>/dev/null | tail -n +3 | xargs rm -rf 2>/dev/null || true
+    fi
+    # 공간 확인 후 백업 생성
+    if [ "$AVAILABLE_SPACE" -gt 10 ]; then
         echo "백업 생성 중... (사용 가능 공간: ${AVAILABLE_SPACE}GB)"
         sudo cp -r $DEPLOY_DIR $BACKUP_DIR 2>/dev/null || {
             echo "⚠️  백업 생성 실패 (디스크 공간 부족 가능). 계속 진행합니다..."
         }
-        echo "백업 위치: $BACKUP_DIR"
+        if [ -d "$BACKUP_DIR" ]; then
+            echo "백업 위치: $BACKUP_DIR"
+        fi
     else
         echo "⚠️  디스크 공간 부족 (사용 가능: ${AVAILABLE_SPACE}GB). 백업을 건너뜁니다."
+        echo "   필요시 수동으로 백업하세요: cp -r $DEPLOY_DIR $BACKUP_DIR"
     fi
 fi
 
