@@ -114,6 +114,19 @@ fi
 CLEANED_SPACE=$(df -h / | awk 'NR==2 {print $3}')
 echo "✅ 디스크 공간 정리 완료 (현재 사용량: ${CLEANED_SPACE})"
 
+# 1-7. 추가 정리: /var/cache 정리 (선택사항)
+if [ -d "/var/cache" ]; then
+    CACHE_SIZE=$(du -sh /var/cache 2>/dev/null | cut -f1)
+    if [ -n "$CACHE_SIZE" ]; then
+        echo "  /var/cache 크기: ${CACHE_SIZE}"
+        # yum/dnf 캐시 정리 (선택사항)
+        if command -v yum >/dev/null 2>&1; then
+            yum clean all >/dev/null 2>&1 || true
+            echo "  ✅ yum 캐시 정리 완료"
+        fi
+    fi
+fi
+
 # 2. 만료된 세션 데이터 정리
 echo "[2/7] 만료된 세션 데이터 정리 중..."
 python manage.py clearsessions 2>/dev/null || {

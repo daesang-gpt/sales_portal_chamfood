@@ -27,18 +27,37 @@ if [ -d "$DEPLOY_DIR" ]; then
         cd /opt
         ls -t sales-portal-backup-* 2>/dev/null | tail -n +3 | xargs rm -rf 2>/dev/null || true
     fi
-    # 공간 확인 후 백업 생성
+    # 공간 확인 후 백업 생성 (불필요한 디렉토리 제외)
     if [ "$AVAILABLE_SPACE" -gt 10 ]; then
         echo "백업 생성 중... (사용 가능 공간: ${AVAILABLE_SPACE}GB)"
-        sudo cp -r $DEPLOY_DIR $BACKUP_DIR 2>/dev/null || {
+        echo "  불필요한 디렉토리 제외: venv, node_modules, .next, staticfiles, logs, db_dumps, .git"
+        
+        # 백업 디렉토리 생성
+        sudo mkdir -p "$BACKUP_DIR"
+        
+        # 필요한 파일만 백업 (rsync 사용, 제외 옵션)
+        sudo rsync -a --exclude='venv' \
+                    --exclude='node_modules' \
+                    --exclude='.next' \
+                    --exclude='staticfiles' \
+                    --exclude='logs' \
+                    --exclude='db_dumps' \
+                    --exclude='.git' \
+                    --exclude='__pycache__' \
+                    --exclude='*.pyc' \
+                    --exclude='*.log' \
+                    --exclude='.env*' \
+                    "$DEPLOY_DIR/" "$BACKUP_DIR/" 2>/dev/null || {
             echo "⚠️  백업 생성 실패 (디스크 공간 부족 가능). 계속 진행합니다..."
+            sudo rm -rf "$BACKUP_DIR" 2>/dev/null || true
         }
+        
         if [ -d "$BACKUP_DIR" ]; then
-            echo "백업 위치: $BACKUP_DIR"
+            BACKUP_SIZE=$(du -sh "$BACKUP_DIR" 2>/dev/null | cut -f1)
+            echo "  ✅ 백업 완료: $BACKUP_DIR (크기: ${BACKUP_SIZE})"
         fi
     else
         echo "⚠️  디스크 공간 부족 (사용 가능: ${AVAILABLE_SPACE}GB). 백업을 건너뜁니다."
-        echo "   필요시 수동으로 백업하세요: cp -r $DEPLOY_DIR $BACKUP_DIR"
     fi
 fi
 
