@@ -116,11 +116,29 @@ export DB_PASSWORD=salesportal123
 echo "마이그레이션 상태 확인 중..."
 python manage.py showmigrations myapi | tail -5 || true
 
-# 마이그레이션 실행
-# --fake-initial: 초기 마이그레이션이 이미 적용된 것으로 간주 (테이블이 존재하면)
-# 이렇게 하면 처음 DB 생성 시에는 모든 마이그레이션을 실행하고,
-# 이후 Git pull 시에는 새로운 마이그레이션만 적용됨
-python manage.py migrate --fake-initial
+# 테이블 존재 여부 확인
+echo "데이터베이스 테이블 존재 여부 확인 중..."
+TABLE_EXISTS=$(python manage.py shell -c "
+from django.db import connection
+cursor = connection.cursor()
+try:
+    cursor.execute(\"SELECT COUNT(*) FROM user_tables WHERE table_name LIKE 'MYAPI_%'\")
+    count = cursor.fetchone()[0]
+    print(count)
+except:
+    print('0')
+" 2>/dev/null | tail -1)
+
+if [ "$TABLE_EXISTS" = "0" ] || [ -z "$TABLE_EXISTS" ]; then
+    echo "테이블이 없습니다. --run-syncdb로 스키마 생성 중..."
+    # 테이블이 없으면 --run-syncdb로 현재 모델 상태로 테이블 생성
+    python manage.py migrate --run-syncdb
+else
+    echo "테이블이 존재합니다. 마이그레이션 적용 중..."
+    # 테이블이 있으면 --fake-initial로 마이그레이션 적용
+    # --fake-initial: 초기 마이그레이션이 이미 적용된 것으로 간주 (테이블이 존재하면)
+    python manage.py migrate --fake-initial
+fi
 
 # 7. 데이터베이스 복원 (덤프 파일이 있는 경우)
 echo ""
