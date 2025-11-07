@@ -35,7 +35,7 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 # 로깅 설정 (운영용)
 # 로그 디렉토리 생성 (없으면 자동 생성)
-LOG_DIR = os.path.join(os.path.dirname(BASE_DIR), 'logs')
+LOG_DIR = os.path.join(BASE_DIR, 'logs')
 os.makedirs(LOG_DIR, exist_ok=True)
 
 LOGGING = {
