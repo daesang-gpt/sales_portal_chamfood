@@ -52,6 +52,16 @@ source venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
 
+# Django Oracle 백엔드 패치 (oracledb 사용하도록)
+echo ""
+echo "[4.5/7] Django Oracle 백엔드 패치 중..."
+if [ -f "$DEPLOY_DIR/patch_django_oracle.sh" ]; then
+    chmod +x $DEPLOY_DIR/patch_django_oracle.sh
+    $DEPLOY_DIR/patch_django_oracle.sh
+else
+    echo "⚠️  patch_django_oracle.sh 파일을 찾을 수 없습니다. 수동으로 패치가 필요할 수 있습니다."
+fi
+
 # 5. Frontend 설정
 echo ""
 echo "[5/7] Frontend 환경 설정 중..."
