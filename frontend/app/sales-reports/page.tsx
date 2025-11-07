@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -22,18 +22,20 @@ const PERIOD_OPTIONS = [
 export default function SalesReportsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const initialPage = Number(searchParams.get("page")) || 1;
+  const [inputValue, setInputValue] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [period, setPeriod] = useState("all");
-  const [currentPage, setCurrentPage] = useState(initialPage);
+  
+  // URL의 page 파라미터를 단일 소스로 사용
+  const currentPage = Number(searchParams.get("page")) || 1;
   const [reports, setReports] = useState<SalesReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
 
-  // 검색 버튼 클릭 시 API 호출
-  const fetchReports = async (page = 1, search = searchTerm, periodValue = period) => {
+  // API 호출 함수
+  const fetchReports = useCallback(async (page: number, search: string = searchTerm, periodValue: string = period) => {
     setLoading(true);
     setError(null);
     try {
@@ -44,46 +46,82 @@ export default function SalesReportsPage() {
         period: periodValue,
         ordering: "-visitDate",
       });
-      setReports((data as any).results);
+      setReports(data.results);
       setTotalCount(data.count);
       setTotalPages(data.total_pages);
-      setCurrentPage(data.current_page);
     } catch (err) {
       setError("영업일지를 불러오는 중 오류가 발생했습니다.");
     } finally {
       setLoading(false);
     }
+  }, [searchTerm, period]);
+
+  // URL 파라미터 변경 시 상태 동기화
+  useEffect(() => {
+    const urlSearch = searchParams.get("search");
+    const urlPeriod = searchParams.get("period");
+    
+    // 검색어 동기화
+    if (urlSearch) {
+      setInputValue(urlSearch);
+      setSearchTerm(urlSearch);
+    } else {
+      // URL에 검색어가 없으면 초기화
+      setInputValue("");
+      setSearchTerm("");
+    }
+    
+    // 기간 동기화
+    if (urlPeriod && PERIOD_OPTIONS.some(opt => opt.value === urlPeriod)) {
+      setPeriod(urlPeriod);
+    } else {
+      setPeriod("all");
+    }
+  }, [searchParams]);
+
+  // URL의 page 파라미터가 변경될 때마다 데이터 로드 (초기 로드, 브라우저 뒤로가기 포함)
+  useEffect(() => {
+    fetchReports(currentPage, searchTerm, period);
+  }, [currentPage, searchTerm, period, fetchReports]);
+
+  // 페이지 변경 핸들러 (URL만 업데이트)
+  const handlePageChange = (page: number) => {
+    const params = new URLSearchParams();
+    params.set("page", String(page));
+    if (searchTerm.trim()) {
+      params.set("search", searchTerm.trim());
+    }
+    if (period !== "all") {
+      params.set("period", period);
+    }
+    router.replace(`/sales-reports?${params.toString()}`);
   };
 
-  // 최초 마운트 시 1회 호출
-  useEffect(() => {
-    fetchReports(1, searchTerm, period);
-    // eslint-disable-next-line
-  }, []);
-
-  // 페이지 변경 시 API 호출
-  useEffect(() => {
-    if (currentPage !== initialPage) {
-      fetchReports(currentPage, searchTerm, period);
-      // URL 쿼리스트링 동기화
-      const params = new URLSearchParams(searchParams.toString());
-      params.set("page", String(currentPage));
-      router.replace(`/sales-reports?${params.toString()}`);
+  // 기간 변경 핸들러
+  const handlePeriodChange = (periodValue: string) => {
+    setPeriod(periodValue);
+    setInputValue("");
+    setSearchTerm("");
+    const params = new URLSearchParams();
+    params.set("page", "1");
+    if (periodValue !== "all") {
+      params.set("period", periodValue);
     }
-    // eslint-disable-next-line
-  }, [currentPage]);
-
-  // 기간 변경 시 API 호출
-  useEffect(() => {
-    fetchReports(1, searchTerm, period);
-    setCurrentPage(1);
-    // eslint-disable-next-line
-  }, [period]);
+    router.replace(`/sales-reports?${params.toString()}`);
+  };
 
   // 검색 버튼 클릭 핸들러
   const handleSearch = () => {
-    fetchReports(1, searchTerm, period);
-    setCurrentPage(1);
+    setSearchTerm(inputValue);
+    const params = new URLSearchParams();
+    params.set("page", "1");
+    if (inputValue.trim()) {
+      params.set("search", inputValue.trim());
+    }
+    if (period !== "all") {
+      params.set("period", period);
+    }
+    router.replace(`/sales-reports?${params.toString()}`);
   };
 
   const formatDate = (dateString: string) => {
@@ -175,8 +213,8 @@ export default function SalesReportsPage() {
               <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="회사명, 작성자 또는 태그로 검색..."
-                value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
+                value={inputValue}
+                onChange={e => setInputValue(e.target.value)}
                 className="pl-8"
                 onKeyDown={e => { if (e.key === 'Enter') handleSearch(); }}
               />
@@ -186,7 +224,7 @@ export default function SalesReportsPage() {
               {PERIOD_OPTIONS.map(opt => (
                 <Button
                   key={opt.value}
-                  onClick={() => setPeriod(opt.value)}
+                  onClick={() => handlePeriodChange(opt.value)}
                   variant={period === opt.value ? "default" : "outline"}
                 >
                   {opt.label}
@@ -237,9 +275,9 @@ export default function SalesReportsPage() {
                           </Badge>
                           <Badge 
                             variant="outline" 
-                            className={`${getSalesStageStyle((report as any).sales_stage)} border`}
+                            className={`${getSalesStageStyle(report.sales_stage)} border`}
                           >
-                            {(report as any).sales_stage || '미지정'}
+                            {report.sales_stage || '미지정'}
                           </Badge>
                         </div>
                       </TableCell>
@@ -279,7 +317,7 @@ export default function SalesReportsPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  onClick={() => handlePageChange(Math.max(currentPage - 1, 1))}
                   disabled={currentPage === 1}
                 >
                   <ChevronLeft className="h-4 w-4" />
@@ -302,7 +340,7 @@ export default function SalesReportsPage() {
                         key={pageNum}
                         variant={currentPage === pageNum ? "default" : "outline"}
                         size="sm"
-                        onClick={() => setCurrentPage(pageNum)}
+                        onClick={() => handlePageChange(pageNum)}
                         className="w-8 h-8 p-0"
                       >
                         {pageNum}
@@ -313,12 +351,12 @@ export default function SalesReportsPage() {
                 <PaginationInput
                   currentPage={currentPage}
                   totalPages={totalPages}
-                  onPageChange={setCurrentPage}
+                  onPageChange={handlePageChange}
                 />
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  onClick={() => handlePageChange(Math.min(currentPage + 1, totalPages))}
                   disabled={currentPage === totalPages}
                 >
                   다음

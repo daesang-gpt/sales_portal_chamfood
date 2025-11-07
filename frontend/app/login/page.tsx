@@ -7,34 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-
-// 환경에 따른 API URL 설정
-const getApiBaseUrl = () => {
-  // 브라우저 환경에서 현재 호스트 확인
-  if (typeof window !== 'undefined') {
-    const hostname = window.location.hostname;
-    const port = window.location.port;
-    console.log('Current hostname:', hostname);
-    console.log('Current port:', port);
-    
-    // 개발 환경 체크 (더 포괄적으로)
-    if (hostname === 'localhost' || 
-        hostname === '127.0.0.1' || 
-        hostname.startsWith('172.28.') ||  // Docker/VM 환경
-        port === '3000') {
-      console.log('Using development API URL: http://127.0.0.1:8000');
-      return 'http://127.0.0.1:8000';
-    }
-    
-    // 그 외의 경우 운영 환경으로 간주
-    console.log('Using production API URL: http://192.168.99.37:8000');
-    return 'http://192.168.99.37:8000';
-  }
-  
-  // 서버 사이드 렌더링 시 개발 환경으로 간주
-  console.log('SSR - Using development API URL: http://127.0.0.1:8000');
-  return 'http://127.0.0.1:8000';
-};
+import { getApiBaseUrl } from '@/lib/api';
 
 interface LoginResponse {
   success: boolean;
@@ -78,9 +51,10 @@ export default function LoginPage() {
     setError('');
 
     try {
-      const apiUrl = `${getApiBaseUrl()}/api/login/`;
-      console.log('Login API URL:', apiUrl);
-      console.log('Login data:', { id: username, password: '***' });
+      const apiUrl = `${getApiBaseUrl()}/login/`;
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Login API URL:', apiUrl);
+      }
       
       const response = await fetch(apiUrl, {
         method: 'POST',
@@ -92,9 +66,6 @@ export default function LoginPage() {
           password: password,
         }),
       });
-      
-      console.log('Response status:', response.status);
-      console.log('Response ok:', response.ok);
 
       if (!response.ok) {
         setError('아이디 또는 비밀번호가 올바르지 않습니다.');
@@ -103,10 +74,8 @@ export default function LoginPage() {
       }
 
       const data: LoginResponse = await response.json();
-      console.log('Response data:', data);
       
       if (data.success && data.access_token && data.user) {
-        console.log('Login successful, storing tokens');
         localStorage.setItem('access_token', data.access_token);
         localStorage.setItem('refresh_token', data.refresh_token || '');
         localStorage.setItem('user', JSON.stringify(data.user));
@@ -117,7 +86,6 @@ export default function LoginPage() {
           return;
         }
       } else {
-        console.log('Login failed:', data.message);
         setError(data.message || '로그인에 실패했습니다.');
         setIsLoading(false);
         return;

@@ -48,10 +48,11 @@ class Company(models.Model):
         blank=True, 
         null=True, 
         choices=[
-            ('기존', '기존'),
+            ('잠재', '잠재'),
             ('신규', '신규'),
+            ('기존', '기존'),
             ('이탈', '이탈'),
-            ('기타', '기타'),
+            ('벤더', '벤더'),
         ],
         verbose_name='고객분류'
     )
@@ -93,6 +94,71 @@ class Company(models.Model):
     code_create_date = models.DateField(blank=True, null=True, verbose_name='코드생성일')
     transaction_start_date = models.DateField(blank=True, null=True, verbose_name='거래시작일')
     payment_terms = models.CharField(max_length=200, blank=True, null=True, verbose_name='결제조건')
+
+    def calculate_customer_classification(self):
+        """
+        고객 구분을 자동으로 계산하는 메서드
+        규칙:
+        - 벤더: SAP 코드여부 속성이 매입인 거래처
+        - 잠재: SAP 코드가 없는 거래처
+        - 신규: SAP 코드가 있고 코드생성일 기준 3개월 이내인 거래처
+        - 기존: SAP 코드가 있고 코드생성일 기준 3개월 초과인 거래처
+        - 이탈: SAP 코드가 있고, 마지막 거래일이 3개월 초과인 거래처 (거래일 없으면 이탈)
+        """
+        from datetime import date, timedelta
+        from django.utils import timezone
+        
+        today = timezone.now().date()
+        
+        # 1. 벤더 확인: SAP 코드여부 속성이 매입인 거래처
+        if self.sap_code_type == '매입':
+            return '벤더'
+        
+        # 2. 잠재 확인: SAP 코드가 없는 거래처
+        if not self.company_code_sap:
+            return '잠재'
+        
+        # 3. 마지막 거래일 조회 (SalesData에서 company_code_sap로 매칭)
+        last_transaction = None
+        if self.company_code_sap:
+            try:
+                last_transaction = SalesData.objects.filter(
+                    코드=self.company_code_sap
+                ).order_by('-매출일자').first()
+            except Exception:
+                pass
+        
+        # 4. 코드생성일 기준 신규/기존 판단
+        if self.code_create_date:
+            days_since_code_creation = (today - self.code_create_date).days
+            
+            # SAP 코드가 있고 코드생성일 기준 3개월 이내이면 신규
+            if days_since_code_creation <= 90:
+                return '신규'
+            
+            # SAP 코드가 있고 코드생성일 기준 3개월 초과이면 기존 또는 이탈
+            # 마지막 거래일 확인
+            if last_transaction and last_transaction.매출일자:
+                days_since_last_transaction = (today - last_transaction.매출일자).days
+                # 마지막 거래일이 3개월 초과이면 이탈
+                if days_since_last_transaction > 90:
+                    return '이탈'
+                else:
+                    return '기존'
+            else:
+                # 거래일이 없으면 이탈
+                return '이탈'
+        else:
+            # 코드생성일이 없으면 마지막 거래일만 확인
+            if last_transaction and last_transaction.매출일자:
+                days_since_last_transaction = (today - last_transaction.매출일자).days
+                if days_since_last_transaction > 90:
+                    return '이탈'
+                else:
+                    return '기존'
+            else:
+                # 거래일이 없으면 이탈
+                return '이탈'
 
     def __str__(self):
         return self.company_name or 'Unknown Company'

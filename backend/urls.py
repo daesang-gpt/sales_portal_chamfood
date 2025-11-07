@@ -16,8 +16,14 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+import os
 
-urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('api/', include('myapi.urls')),
-]
+# dumpdata 실행 시 views import 건너뛰기 (torch DLL 오류 방지)
+if os.environ.get('SKIP_VIEWS_IMPORT', 'False').lower() != 'true':
+    urlpatterns = [
+        path('admin/', admin.site.urls),
+        path('api/', include('myapi.urls')),
+    ]
+else:
+    # dumpdata 실행 시 URL 패턴 비활성화
+    urlpatterns = []

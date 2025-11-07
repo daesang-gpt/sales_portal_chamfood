@@ -8,7 +8,7 @@ import { Separator } from "@/components/ui/separator"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, ComposedChart, Legend } from "recharts"
 import { ArrowLeft, Edit, Building2, Phone, MapPin, Calendar, DollarSign, Loader2 } from "lucide-react"
 import Link from "next/link"
-import { useParams, useRouter } from "next/navigation"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { companyApi, Company, salesReportApi, SalesReport, companyFinancialStatusApi, CompanyFinancialStatus, companySalesDataApi } from "@/lib/api"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { isAdmin } from "@/lib/auth"
@@ -16,11 +16,15 @@ import { toast } from "@/hooks/use-toast"
 
 export default function CompanyDetailPage() {
   const params = useParams()
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const page = searchParams.get("page") || "1";
+  const search = searchParams.get("search") || "";
+  
   const [company, setCompany] = useState<Company | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   // const [users, setUsers] = useState<User[]>([]);
-  const router = useRouter();
   const [isAdminUser, setIsAdminUser] = useState(false);
   const [financialStatus, setFinancialStatus] = useState<CompanyFinancialStatus[]>([]);
   const [salesData, setSalesData] = useState<any>(null);
@@ -62,8 +66,8 @@ export default function CompanyDetailPage() {
       if (!company?.company_code) return;
       try {
         const data = await companyFinancialStatusApi.getByCompanyCode(company.company_code);
-        const list = Array.isArray(data) ? data : (data as any).results;
-        setFinancialStatus(list.sort((a: any, b: any) => b.fiscal_year.localeCompare(a.fiscal_year)));
+        const list = Array.isArray(data) ? data : data;
+        setFinancialStatus(list.sort((a, b) => b.fiscal_year.localeCompare(a.fiscal_year)));
         console.log("setFinancialStatus", data); // 추가
 
       } catch (e) {
@@ -166,6 +170,21 @@ export default function CompanyDetailPage() {
     return company.employee_name || '-';
   }
 
+  const getCustomerTypeBadgeStyle = (customerType: string) => {
+    if (customerType === "잠재") {
+      return "bg-yellow-400 text-yellow-950 border-yellow-500 font-semibold";
+    } else if (customerType === "기존") {
+      return "bg-white text-gray-900 border-2 border-gray-400 font-semibold";
+    } else if (customerType === "이탈") {
+      return "bg-red-500 text-white border-red-600 font-semibold";
+    } else if (customerType === "벤더") {
+      return "bg-green-500 text-white border-green-600 font-semibold";
+    } else if (customerType === "신규") {
+      return "bg-blue-500 text-white border-blue-600 font-semibold";
+    }
+    return "";
+  }
+
   // 회사 삭제 함수
   const handleDelete = async () => {
     if (!company) return;
@@ -174,7 +193,10 @@ export default function CompanyDetailPage() {
       setLoading(true);
       await companyApi.deleteCompany(company.company_code);
       alert('회사가 삭제되었습니다.');
-      router.push('/companies');
+      const params = new URLSearchParams();
+      if (page !== "1") params.set("page", page);
+      if (search) params.set("search", search);
+      router.push(`/companies${params.toString() ? `?${params.toString()}` : ''}`);
     } catch (err: any) {
       console.error('회사 삭제 오류:', err);
       
@@ -276,7 +298,7 @@ export default function CompanyDetailPage() {
         <div className="text-center">
           <p className="text-red-500 mb-4">{error || '회사 정보를 찾을 수 없습니다.'}</p>
           <Button asChild>
-            <Link href="/companies">목록으로 돌아가기</Link>
+            <Link href={`/companies?page=${page}${search ? `&search=${encodeURIComponent(search)}` : ''}`}>목록으로 돌아가기</Link>
           </Button>
         </div>
       </div>
@@ -288,19 +310,28 @@ export default function CompanyDetailPage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
           <Button variant="outline" size="sm" asChild>
-            <Link href="/companies">
+            <Link href={`/companies?page=${page}${search ? `&search=${encodeURIComponent(search)}` : ''}`}>
               <ArrowLeft className="mr-2 h-4 w-4" />
               목록으로
             </Link>
           </Button>
           <h1 className="text-3xl font-bold">{getCompanyDisplayName(company)}</h1>
-          <Badge variant={getCompanyCustomerType(company) === "신규" ? "default" : "secondary"}>
-            {getCompanyCustomerType(company)}
-          </Badge>
+          {(() => {
+            const customerType = getCompanyCustomerType(company);
+            const badgeStyle = getCustomerTypeBadgeStyle(customerType);
+            return (
+              <Badge 
+                variant="outline"
+                className={badgeStyle || undefined}
+              >
+                {customerType}
+              </Badge>
+            );
+          })()}
         </div>
         <div className="flex gap-2">
           <Button asChild>
-            <Link href={`/companies/${company.company_code}/edit`}>
+            <Link href={`/companies/${company.company_code}/edit?page=${page}${search ? `&search=${encodeURIComponent(search)}` : ''}`}>
               <Edit className="mr-2 h-4 w-4" />
               수정
             </Link>
@@ -324,18 +355,6 @@ export default function CompanyDetailPage() {
           </CardHeader>
           <CardContent className="space-y-4 text-base text-gray-800">
             <div className="grid grid-cols-2 gap-4">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">회사코드</p>
-                <p className="text-lg">{company.company_code || '-'}</p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">회사명</p>
-                <p className="text-lg">{company.company_name || '-'}</p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">고객분류</p>
-                <p className="text-lg">{company.customer_classification || '-'}</p>
-              </div>
               <div>
                 <p className="text-sm font-medium text-muted-foreground">회사유형</p>
                 <p className="text-lg">{company.company_type || '-'}</p>
@@ -363,14 +382,12 @@ export default function CompanyDetailPage() {
                   <p className="text-lg">{company.head_address || '-'}</p>
                 </div>
               </div>
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">시/구</p>
-                <p className="text-lg">{company.city_district || '-'}</p>
-              </div>
-              <div className="col-span-2">
-                <p className="text-sm font-medium text-muted-foreground mb-1">공장 주소</p>
-                <p className="text-lg">{company.processing_address || '-'}</p>
-              </div>
+              {company.processing_address && (
+                <div className="col-span-2">
+                  <p className="text-sm font-medium text-muted-foreground mb-1">공장 주소</p>
+                  <p className="text-lg">{company.processing_address}</p>
+                </div>
+              )}
               <div>
                 <p className="text-sm font-medium text-muted-foreground">업종명</p>
                 <p className="text-lg">{company.industry_name || '-'}</p>
@@ -383,22 +400,23 @@ export default function CompanyDetailPage() {
                 <p className="text-sm font-medium text-muted-foreground">웹사이트</p>
                 <p className="text-lg break-all">{company.website || '-'}</p>
               </div>
-              <div className="col-span-2">
-                <p className="text-sm font-medium text-muted-foreground">참고사항</p>
-                <p className="text-lg whitespace-pre-wrap">{company.remarks || '-'}</p>
-              </div>
             </div>
           </CardContent>
         </Card>
 
         {/* SAP정보 */}
-        <Card>
+        <Card className="relative">
           <CardHeader>
             <CardTitle className="flex items-center space-x-2">
               <DollarSign className="h-5 w-5" />
               <span>SAP정보</span>
             </CardTitle>
           </CardHeader>
+          {(!company.sap_code_type || company.sap_code_type === '-') ? (
+            <div className="absolute inset-0 bg-gray-600/80 rounded-lg flex items-center justify-center z-10">
+              <p className="text-white text-lg font-medium">SAP 거래처 정보가 없습니다.</p>
+            </div>
+          ) : null}
           <CardContent className="space-y-4 text-base text-gray-800">
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -410,32 +428,16 @@ export default function CompanyDetailPage() {
                 <p className="text-lg">{company.company_code_sap || '-'}</p>
               </div>
               <div>
-                <p className="text-sm font-medium text-muted-foreground">사업</p>
-                <p className="text-lg">{company.biz_code || '-'}</p>
-              </div>
-              <div>
                 <p className="text-sm font-medium text-muted-foreground">사업부</p>
                 <p className="text-lg">{company.biz_name || '-'}</p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">지점/팀</p>
-                <p className="text-lg">{company.department_code || '-'}</p>
               </div>
               <div>
                 <p className="text-sm font-medium text-muted-foreground">팀명</p>
                 <p className="text-lg">{company.department || '-'}</p>
               </div>
               <div>
-                <p className="text-sm font-medium text-muted-foreground">사원번호</p>
-                <p className="text-lg">{company.employee_number || '-'}</p>
-              </div>
-              <div>
                 <p className="text-sm font-medium text-muted-foreground">영업 사원</p>
                 <p className="text-lg">{company.employee_name || '-'}</p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">유통형태코드</p>
-                <p className="text-lg">{company.distribution_type_sap_code || '-'}</p>
               </div>
               <div>
                 <p className="text-sm font-medium text-muted-foreground">유통형태</p>
@@ -465,6 +467,18 @@ export default function CompanyDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* 참고사항 */}
+      {getCompanyNotes(company) !== '-' && (
+        <Card>
+          <CardHeader>
+            <CardTitle>참고사항</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-lg whitespace-pre-wrap">{getCompanyNotes(company)}</p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* 매출 차트 - 재무정보가 있을 때만 표시 */}
       {isClient && financialStatus.length > 0 ? (
@@ -624,7 +638,7 @@ export default function CompanyDetailPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>최근판매축종</CardTitle>
-              <span className="text-xs text-muted-foreground">최근 6개월 중량(톤)</span>
+              <span className="text-xs text-muted-foreground">최근 12개월 중량(톤)</span>
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={300}>
@@ -674,24 +688,12 @@ export default function CompanyDetailPage() {
         <Card>
           <CardContent className="flex items-center justify-center py-12">
             <div className="text-center">
-              <p className="text-lg text-muted-foreground">최근 6개월 매출 데이터가 없습니다.</p>
+              <p className="text-lg text-muted-foreground">최근 12개월 매출 데이터가 없습니다.</p>
               <p className="text-sm text-muted-foreground mt-2">SAP 회사코드: {company?.company_code_sap || '없음'}</p>
             </div>
           </CardContent>
         </Card>
       ) : null}
-
-      {/* 참고사항 */}
-      {getCompanyNotes(company) !== '-' && (
-        <Card>
-          <CardHeader>
-            <CardTitle>참고사항</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-lg">{getCompanyNotes(company)}</p>
-          </CardContent>
-        </Card>
-      )}
 
       {/* 영업일지 리스트 */}
       {isClient && <CompanySalesReportList companyId={company.company_code || ""} />}
@@ -736,7 +738,7 @@ function CompanySalesReportList({ companyId }: { companyId: string }) {
           page_size: 100,
         });
         console.log('회사 영업일지 리스트 응답:', data);
-        setReports((data as any).results || []);
+        setReports(data.results || []);
       } catch (err) {
         console.error('회사 영업일지 리스트 조회 오류:', err);
         setError("영업일지 리스트를 불러오는 중 오류가 발생했습니다.");
@@ -777,9 +779,9 @@ function CompanySalesReportList({ companyId }: { companyId: string }) {
                     <TableCell>
                       <Badge 
                         variant="outline" 
-                        className={`${getSalesStageStyle((r as any).sales_stage)} border`}
+                        className={`${getSalesStageStyle(r.sales_stage)} border`}
                       >
-                        {(r as any).sales_stage || '미지정'}
+                        {r.sales_stage || '미지정'}
                       </Badge>
                     </TableCell>
                     <TableCell>{r.content.slice(0, 40)}{r.content.length > 40 ? '...' : ''}</TableCell>

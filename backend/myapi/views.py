@@ -17,7 +17,6 @@ from rest_framework.pagination import PageNumberPagination
 from . import models
 from rest_framework.generics import ListAPIView
 import csv
-import io
 from django.http import HttpResponse
 from django.utils.encoding import escape_uri_path
 import pandas as pd
@@ -51,7 +50,8 @@ def load_tag_candidates_and_embeddings():
         TAG_MODEL = SentenceTransformer('snunlp/KR-SBERT-V40K-klueNLI-augSTS')
     # 태그 임베딩 생성
     TAG_EMBEDDINGS = TAG_MODEL.encode(TAG_CANDIDATES, convert_to_tensor=True)
-    print(f"[태그 임베딩 캐싱 완료] 후보 태그 수: {len(TAG_CANDIDATES)}")
+    logger = logging.getLogger(__name__)
+    logger.debug(f"태그 임베딩 캐싱 완료 - 후보 태그 수: {len(TAG_CANDIDATES)}")
 
 # Create your views here.
 
@@ -87,80 +87,12 @@ class CompanyViewSet(viewsets.ModelViewSet):
         company_code = instance.company_code
         
         # 연결된 영업일지(Report)가 있는지 확인
-        print(f"\n[DEBUG] Company 삭제 확인 시작 - company_code: {repr(company_code)} (타입: {type(company_code).__name__})")
+        logger = logging.getLogger(__name__)
         
         try:
             from django.db import connection
             
-            # 디버깅: 스키마 정보 다시 확인
-            with connection.cursor() as cursor:
-                try:
-                    cursor.execute("""
-                        SELECT COLUMN_NAME, DATA_TYPE, DATA_LENGTH, DATA_PRECISION, DATA_SCALE, NULLABLE 
-                        FROM USER_TAB_COLUMNS 
-                        WHERE TABLE_NAME = 'REPORTS' AND COLUMN_NAME = 'COMPANY_CODE'
-                    """)
-                    column_info = cursor.fetchone()
-                    print(f"[DEBUG] REPORTS.COMPANY_CODE 컬럼 정보: {column_info}")
-                        
-                    cursor.execute("""
-                        SELECT COLUMN_NAME, DATA_TYPE, DATA_LENGTH, DATA_PRECISION, DATA_SCALE, NULLABLE 
-                        FROM USER_TAB_COLUMNS 
-                        WHERE TABLE_NAME = 'COMPANIES' AND COLUMN_NAME = 'COMPANY_CODE'
-                    """)
-                    column_info = cursor.fetchone()
-                    print(f"[DEBUG] COMPANIES.COMPANY_CODE 컬럼 정보: {column_info}")
-                        
-                except Exception as schema_error:
-                    print(f"[DEBUG] 스키마 정보 확인 실패: {schema_error}")
-
-            # 먼저 REPORTS 테이블의 실제 COMPANY_CODE 값들을 확인
-            with connection.cursor() as cursor:
-                try:
-                    cursor.execute("SELECT DISTINCT COMPANY_CODE, TO_CHAR(COMPANY_CODE) FROM REPORTS WHERE ROWNUM <= 10")
-                    sample_data = cursor.fetchall()
-                    print(f"[DEBUG] REPORTS 테이블 샘플 데이터:")
-                    for row in sample_data:
-                        print(f"  원본값: {row[0]} (타입: {type(row[0]).__name__}), TO_CHAR: {row[1]}")
-                except Exception as sample_error:
-                    print(f"[DEBUG] 샘플 데이터 확인 실패: {sample_error}")
-                
-                # 특정 company_code와 관련된 모든 가능한 값들 확인
-                try:
-                    # C를 제거한 숫자 부분
-                    numeric_part = company_code.lstrip('C').lstrip('0') or '0'  # 앞자리 0 제거, 빈 문자열이면 '0'
-                    padded_numeric = company_code.lstrip('C')  # 앞자리 0 유지
-                    
-                    print(f"[DEBUG] 검색할 값들:")
-                    print(f"  company_code: {company_code}")
-                    print(f"  numeric_part: {numeric_part}")
-                    print(f"  padded_numeric: {padded_numeric}")
-                    
-                    # 다양한 형태로 저장된 값들 확인
-                    test_queries = [
-                        f"SELECT COUNT(*) FROM REPORTS WHERE TO_CHAR(COMPANY_CODE) = '{company_code}'",
-                        f"SELECT COUNT(*) FROM REPORTS WHERE TO_CHAR(COMPANY_CODE) = '{numeric_part}'",
-                        f"SELECT COUNT(*) FROM REPORTS WHERE TO_CHAR(COMPANY_CODE) = '{padded_numeric}'",
-                        f"SELECT COUNT(*) FROM REPORTS WHERE COMPANY_CODE = {numeric_part}",
-                        f"SELECT COUNT(*) FROM REPORTS WHERE LPAD(TO_CHAR(COMPANY_CODE), 7, '0') = '{padded_numeric}'",
-                        f"SELECT COUNT(*) FROM REPORTS WHERE 'C' || LPAD(TO_CHAR(COMPANY_CODE), 7, '0') = '{company_code}'",
-                    ]
-                    
-                    for i, test_sql in enumerate(test_queries):
-                        try:
-                            cursor.execute(test_sql)
-                            test_result = cursor.fetchone()[0]
-                            print(f"[DEBUG] 테스트 {i+1}: {test_result}개 - {test_sql}")
-                            if test_result > 0:
-                                print(f"[FOUND] 매칭되는 방식 발견!")
-                                break
-                        except Exception as test_error:
-                            print(f"[DEBUG] 테스트 {i+1} 실패: {test_error}")
-                            
-                except Exception as test_error:
-                    print(f"[DEBUG] 테스트 쿼리 실행 실패: {test_error}")
-
-            # 여러 방식으로 쿼리 시도 (더 많은 패턴 추가)
+            # 여러 방식으로 쿼리 시도
             numeric_part = company_code.lstrip('C').lstrip('0') or '0'
             padded_numeric = company_code.lstrip('C')
             
@@ -177,25 +109,20 @@ class CompanyViewSet(viewsets.ModelViewSet):
             count = 0
             for method_name, sql, params in methods_to_try:
                 try:
-                    print(f"[DEBUG] {method_name} 시도:")
-                    print(f"  SQL: {sql}")
-                    print(f"  매개변수: {params}")
-                    
                     with connection.cursor() as cursor:
                         cursor.execute(sql, params)
                         count = cursor.fetchone()[0]
-                        print(f"  성공! 결과: {count}")
                         break
                         
                 except Exception as method_error:
-                    print(f"  실패: {method_error}")
+                    logger.debug(f"Company 삭제 확인 - {method_name} 실패: {method_error}")
                     continue
             else:
                 # 모든 방법이 실패한 경우
-                print("[ERROR] 모든 쿼리 방법이 실패했습니다")
+                logger.error("모든 쿼리 방법이 실패했습니다")
                 raise Exception("모든 쿼리 방법이 실패했습니다")
                 
-            print(f"[DEBUG] 최종 확인 결과: {count}개의 연관된 Report 발견 (회사코드 기준)")
+            logger.debug(f"Company 삭제 확인 결과: {count}개의 연관된 Report 발견 (회사코드: {company_code})")
                 
             if count > 0:
                 return Response(
@@ -205,11 +132,7 @@ class CompanyViewSet(viewsets.ModelViewSet):
                 )
                     
         except Exception as e:
-            print(f"[ERROR] 회사 삭제 전 확인 중 오류:")
-            print(f"  오류 타입: {type(e).__name__}")
-            print(f"  오류 메시지: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"회사 삭제 전 확인 중 오류 발생: {str(e)}", exc_info=True)
             
             # 쿼리 실패 시 안전을 위해 삭제 차단
             return Response(
@@ -220,14 +143,10 @@ class CompanyViewSet(viewsets.ModelViewSet):
         
         # 안전하게 회사 삭제 - Django ORM 대신 우리가 만든 perform_destroy 직접 호출
         try:
-            print(f"[DEBUG] Django ORM 대신 perform_destroy 직접 호출")
             self.perform_destroy(instance)
-            print(f"[DEBUG] perform_destroy 성공!")
             return Response(status=status.HTTP_204_NO_CONTENT)
         except Exception as e:
-            print(f"[ERROR] perform_destroy 실패: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"perform_destroy 실패: {e}", exc_info=True)
             return Response(
                 {'error': f'회사 삭제 중 오류 발생: {str(e)}'}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR, 
@@ -239,8 +158,7 @@ class CompanyViewSet(viewsets.ModelViewSet):
         from django.db import transaction, connection
         
         company_code = instance.company_code
-        
-        print(f"\n[DEBUG] perform_destroy 시작 - company_code: {repr(company_code)} (타입: {type(company_code).__name__})")
+        logger = logging.getLogger(__name__)
         
         with transaction.atomic():
             # 각 테이블별로 스키마 정보 확인 후 삭제
@@ -281,8 +199,6 @@ class CompanyViewSet(viewsets.ModelViewSet):
                 table_name = operation["table"]
                 methods_to_try = operation["methods"]
                 
-                print(f"\n[DEBUG] {operation_name} 처리 시작 (테이블: {table_name})")
-                
                 # 테이블의 COMPANY_CODE 컬럼 정보 확인
                 try:
                     with connection.cursor() as cursor:
@@ -293,42 +209,72 @@ class CompanyViewSet(viewsets.ModelViewSet):
                         """)
                         column_info = cursor.fetchone()
                         if column_info:
-                            print(f"[DEBUG] {table_name}.COMPANY_CODE 컬럼 정보: {column_info}")
+                            logger.debug(f"{table_name}.COMPANY_CODE 컬럼 정보: {column_info}")
                         else:
-                            print(f"[DEBUG] {table_name}.COMPANY_CODE 컬럼을 찾을 수 없음")
+                            logger.debug(f"{table_name}.COMPANY_CODE 컬럼을 찾을 수 없음")
                 except Exception as schema_error:
-                    print(f"[DEBUG] {table_name} 스키마 정보 확인 실패: {schema_error}")
+                    logger.debug(f"{table_name} 스키마 정보 확인 실패: {schema_error}")
                 
                 # 여러 방식으로 쿼리 시도
                 success = False
                 for method_name, sql, params in methods_to_try:
                     try:
-                        print(f"[DEBUG] {method_name} 시도:")
-                        print(f"  SQL: {sql}")
-                        print(f"  매개변수: {params}")
-                        
                         with connection.cursor() as cursor:
                             cursor.execute(sql, params)
                             affected_rows = cursor.rowcount
-                            print(f"  성공! 영향받은 행 수: {affected_rows}")
+                            logger.debug(f"{operation_name} 처리 완료 ({method_name}): {affected_rows}행 영향받음")
                             success = True
                             break
                             
                     except Exception as method_error:
-                        print(f"  실패: {method_error}")
+                        logger.debug(f"{operation_name} 처리 실패 ({method_name}): {method_error}")
                         continue
                 
                 if not success:
                     error_msg = f"{operation_name} 처리 중 모든 쿼리 방법이 실패했습니다"
-                    print(f"[ERROR] {error_msg}")
+                    logger.error(error_msg)
                     raise Exception(error_msg)
-                else:
-                    print(f"[SUCCESS] {operation_name} 처리 완료")
-            
-            print(f"[SUCCESS] Company 삭제 완료: {company_code}")
+                    
+            logger.info(f"Company 삭제 완료: {company_code}")
+
+    def perform_create(self, serializer):
+        """회사 생성 시 고객 구분 자동 계산"""
+        instance = serializer.save()
+        # 고객 구분 자동 계산 및 저장
+        instance.customer_classification = instance.calculate_customer_classification()
+        instance.save(update_fields=['customer_classification'])
+    
+    def perform_update(self, serializer):
+        """회사 업데이트 시 고객 구분 자동 계산"""
+        instance = serializer.save()
+        # 고객 구분 자동 계산 및 저장
+        instance.customer_classification = instance.calculate_customer_classification()
+        instance.save(update_fields=['customer_classification'])
+
+    def create(self, request, *args, **kwargs):
+        """회사 생성 시 고객 구분 자동 계산 및 회사코드 자동 생성"""
+        # 회사코드가 없으면 자동 생성
+        data = dict(request.data)
+        if not data.get('company_code') or not data.get('company_code', '').strip():
+            # 회사ID 생성: company_code = 'C'+7자리
+            last_code = Company.objects.filter(company_code__startswith='C').aggregate(
+                max_code=Max('company_code')
+            )['max_code']
+            if last_code and last_code[1:].isdigit():
+                next_num = int(last_code[1:]) + 1
+            else:
+                next_num = 1
+            new_code = f'C{next_num:07d}'
+            data['company_code'] = new_code
+        
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
     def update(self, request, *args, **kwargs):
-        """회사 정보 수정 시 재무 정보도 함께 처리"""
+        """회사 정보 수정 시 재무 정보도 함께 처리하고 고객 구분 자동 계산"""
         instance = self.get_object()
         partial = kwargs.pop('partial', False)
         
@@ -382,7 +328,7 @@ class CompanyViewSet(viewsets.ModelViewSet):
                         )
                     except Exception as e:
                         # 재무 정보 처리 오류는 무시하거나 로그만 남김
-                        print(f"재무 정보 처리 오류: {e}")
+                        logger.debug(f"재무 정보 처리 오류: {e}")
                         pass
         
         if getattr(instance, '_prefetched_objects_cache', None):
@@ -470,12 +416,14 @@ class ReportViewSet(viewsets.ModelViewSet):
                     new_code = f'C{next_num:07d}'
                     
                     # location 정보를 city_district로 설정
+                    # 작성자 정보(사원번호, 이름)도 함께 저장
                     new_company = Company.objects.create(
                         company_code=new_code,
                         company_name=company_name_input,
-                        customer_classification='신규',
+                        customer_classification='잠재',
                         products=company_products,
                         city_district=company_location,  # location을 city_district로 저장
+                        employee_number=request.user.employee_number if request.user else None,
                         employee_name=request.user.name if request.user else None
                     )
                     company_obj = new_company
@@ -543,18 +491,14 @@ class ReportViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         partial = kwargs.pop('partial', False)
         
-        print(f"[ReportViewSet.update] ========== 영업일지 수정 디버그 시작 ==========")
-        print(f"[ReportViewSet.update] 영업일지 ID: {instance.id}")
-        print(f"[ReportViewSet.update] 기존 company_code: {instance.company_code}")
-        print(f"[ReportViewSet.update] 기존 company_name: {instance.company_name}")
-        print(f"[ReportViewSet.update] 원본 request.data: {dict(request.data)}")
+        logger = logging.getLogger(__name__)
+        logger.debug(f"영업일지 수정 시작 - ID: {instance.id}, company_code: {instance.company_code}")
         
         # 요청 데이터를 dict로 복사
         data = dict(request.data)
         
         # 회사 관련 데이터 추출 및 검증
         company_code_value = data.get('company_obj') or data.get('company_code')
-        print(f"[ReportViewSet.update] 추출된 company_code_value: {company_code_value} (타입: {type(company_code_value)})")
         if company_code_value:
             try:
                 company_code = company_code_value
@@ -565,9 +509,12 @@ class ReportViewSet(viewsets.ModelViewSet):
                 # 회사 정보를 data에 추가
                 data['company_name'] = company_obj.company_name
                 data['company_city_district'] = company_obj.city_district
-                data['company_code'] = company_obj.company_code
+                # Company 객체를 company_code 필드에 설정 (FK 업데이트를 위해)
+                data['company_code'] = company_obj  # 문자열이 아닌 Company 객체 설정
                 # company_obj 필드는 제거 (company_code로 대체)
                 data.pop('company_obj', None)
+                
+                logger.debug(f"Company 객체 설정: {company_obj.company_code} - {company_obj.company_name}")
                 
                 # 회사 데이터가 있으면 해당 데이터로 설정 (사용자가 입력하지 않았을 때만)
                 if not data.get('products') and not instance.products:
@@ -580,9 +527,7 @@ class ReportViewSet(viewsets.ModelViewSet):
                 }, status=status.HTTP_400_BAD_REQUEST)
             except Exception as e:
                 # 기타 예외 처리
-                import traceback
-                print(f"회사 정보 조회 중 오류: {e}")
-                print(traceback.format_exc())
+                logger.error(f"회사 정보 조회 중 오류: {e}", exc_info=True)
                 return Response({
                     'error': f'회사 정보 조회 중 오류가 발생했습니다: {str(e)}',
                     'company_code': company_code_value
@@ -598,22 +543,15 @@ class ReportViewSet(viewsets.ModelViewSet):
             # company_obj 필드는 제거 (company_code로 대체)
             data.pop('company_obj', None)
         
-        print(f"[ReportViewSet.update] 최종 data: {data}")
-        
         # 표준 DRF 방식으로 serializer 생성 및 검증
         serializer = self.get_serializer(instance, data=data, partial=partial)
-        print(f"[ReportViewSet.update] Serializer 검증 결과: {serializer.is_valid()}")
         serializer.is_valid(raise_exception=True)
         
-        print(f"[ReportViewSet.update] perform_update 호출 전")
         self.perform_update(serializer)
-        print(f"[ReportViewSet.update] perform_update 호출 후")
         
         # 최신 데이터 다시 가져오기
         instance.refresh_from_db()
-        print(f"[ReportViewSet.update] 최종 결과 - company_code: {instance.company_code}")
-        print(f"[ReportViewSet.update] 최종 결과 - company_name: {instance.company_name}")
-        print(f"[ReportViewSet.update] ========== 영업일지 수정 디버그 끝 ==========")
+        logger.debug(f"영업일지 수정 완료 - ID: {instance.id}, company_code: {instance.company_code}, company_name: {instance.company_name}")
         
         if getattr(instance, '_prefetched_objects_cache', None):
             instance._prefetched_objects_cache = {}
@@ -646,11 +584,11 @@ class ReportViewSet(viewsets.ModelViewSet):
 
     def update_with_error_handling(self, request, *args, **kwargs):
         """영업일지 수정 시 더 자세한 오류 처리"""
+        logger = logging.getLogger(__name__)
         try:
             return super().update(request, *args, **kwargs)
         except Exception as e:
-            print(f"영업일지 수정 오류: {e}")
-            print(f"요청 데이터: {request.data}")
+            logger.error(f"영업일지 수정 오류: {e}, 요청 데이터: {request.data}", exc_info=True)
             return Response({
                 'error': '영업일지 수정 중 오류가 발생했습니다.',
                 'details': str(e)
@@ -875,37 +813,29 @@ def change_password_view(request):
 def company_stats_view(request):
     """회사 통계 정보를 반환하는 API"""
     try:
-        # 현재 날짜 정보
-        now = timezone.now()
-        current_month = now.month
-        current_year = now.year
-        
         # 전체 회사 수
         total_companies = Company.objects.count()
         
-        # 신규 고객사 수 (customer_classification이 '신규'인 경우)
+        # 잠재 거래처 수 (customer_classification이 '잠재'인 경우)
+        potential_customers = Company.objects.filter(
+            customer_classification='잠재'
+        ).count()
+        
+        # 신규 거래처 수 (customer_classification이 '신규'인 경우)
         new_customers = Company.objects.filter(
             customer_classification='신규'
         ).count()
         
-        # 기존 고객사 수 (customer_classification이 '기존'인 경우)
+        # 기존 거래처 수 (customer_classification이 '기존'인 경우)
         existing_customers = Company.objects.filter(
             customer_classification='기존'
         ).count()
         
-        # 이번 달 신규 고객사 수
-        # transaction_start_date가 이번 달이고 customer_classification이 '신규'인 경우
-        this_month_new = Company.objects.filter(
-            transaction_start_date__year=current_year,
-            transaction_start_date__month=current_month,
-            customer_classification='신규'
-        ).count()
-        
         return Response({
             'total': total_companies,
+            'potentialCustomers': potential_customers,
             'newCustomers': new_customers,
-            'existingCustomers': existing_customers,
-            'thisMonthNew': this_month_new
+            'existingCustomers': existing_customers
         }, status=status.HTTP_200_OK)
         
     except Exception as e:
@@ -1285,8 +1215,9 @@ def company_suggest_view(request):
 def auto_create_company(request):
     """
     회사명으로 신규 회사 자동 등록 API
-    - 회사명이 DB에 없으면 'C'+7자리 순차 ID, 고객분류 '잠재'로 생성
+    - 회사명이 DB에 없으면 'C'+7자리 순차 ID, 고객분류 '신규'로 생성
     - 이미 있으면 중복 등록하지 않고 기존 회사 반환
+    - 작성자 정보(사원번호, 이름)와 소재지 정보도 함께 저장
     """
     name = request.data.get('company_name')
     if not name:
@@ -1305,10 +1236,19 @@ def auto_create_company(request):
     else:
         next_num = 1
     new_code = f'C{next_num:07d}'
+    
+    # 사용자 정보 및 소재지 정보 추출
+    location = request.data.get('location', '')
+    employee_number = request.user.employee_number if request.user else None
+    employee_name = request.user.name if request.user else None
+    
     company = Company.objects.create(
         company_code=new_code,
         company_name=name,
-        customer_classification='신규'
+        customer_classification='잠재',
+        city_district=location if location else None,
+        employee_number=employee_number,
+        employee_name=employee_name
     )
     serializer = CompanySerializer(company)
     return Response(serializer.data, status=201)
@@ -1368,7 +1308,7 @@ def extract_keywords_view(request):
                 # 유사도가 높거나 텍스트에 직접 포함되면 추가
                 if db_tag in text:
                     result_tags.add(db_tag)
-                elif best_score >= 0.6:  # 임계값을 0.75에서 0.6으로 낮춤
+                elif best_score >= 0.75:  
                     result_tags.add(db_tag)
                     print(f"[키워드 추출 API] 유사도 매칭: {candidate} -> {db_tag} (점수: {best_score:.2f})")
         
@@ -3217,7 +3157,7 @@ def get_company_unique_products(request, company_id):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_company_sales_data(request, company_id):
-    """특정 회사의 최근 6개월 SalesData 조회"""
+    """특정 회사의 최근 12개월 SalesData 조회"""
     try:
         # 회사 정보 조회 (company_code로 조회)
         try:
@@ -3235,11 +3175,11 @@ def get_company_sales_data(request, company_id):
         
         # company_code_sap가 없으면 빈 데이터 반환 (400 에러 대신)
         if not company_code_sap:
-            # 최근 6개월 날짜 범위 계산
+            # 최근 12개월 날짜 범위 계산
             end_date = timezone.now().date()
             current_date = timezone.now()
             all_months = []
-            for i in range(6):
+            for i in range(12):
                 month_date = current_date - timedelta(days=30*i)
                 month_key = month_date.strftime('%Y-%m')
                 all_months.append(month_key)
@@ -3263,14 +3203,14 @@ def get_company_sales_data(request, company_id):
                 'total_records': 0
             }, status=status.HTTP_200_OK)
         
-        # 최근 6개월 날짜 범위 계산
+        # 최근 12개월 날짜 범위 계산
         end_date = timezone.now().date()
-        start_date = end_date - timedelta(days=180)  # 약 6개월
+        start_date = end_date - timedelta(days=365)  # 약 12개월
         
-        # 최근 6개월의 모든 달 생성
+        # 최근 12개월의 모든 달 생성
         all_months = []
         current_date = timezone.now()
-        for i in range(6):
+        for i in range(12):
             month_date = current_date - timedelta(days=30*i)
             month_key = month_date.strftime('%Y-%m')
             all_months.append(month_key)
@@ -3357,7 +3297,7 @@ def get_company_sales_data(request, company_id):
                     month_data[product] = 0
             products_chart_data.append(month_data)
         
-        # 최근 6개월 데이터 정렬
+        # 최근 12개월 데이터 정렬
         sales_chart_data = sorted(monthly_sales.values(), key=lambda x: x['month'])
         
         return Response({

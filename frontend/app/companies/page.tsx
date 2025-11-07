@@ -1,62 +1,42 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Search, Plus, Eye, Building2, Phone, Loader2, ChevronLeft, ChevronRight } from "lucide-react"
+import { Search, Plus, Building2, Loader2, ChevronLeft, ChevronRight } from "lucide-react"
 import Link from "next/link"
 import { companyApi, Company, CompanyFilters, PaginatedResponse } from "@/lib/api"
 import { PaginationInput } from "@/components/ui/pagination"
 import { useRouter, useSearchParams } from "next/navigation"
-// User 타입 정의 (간단히 id, name만 사용)
-// type User = { id: number; name: string };
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 export default function CompaniesPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const initialPage = Number(searchParams.get("page")) || 1;
+  
+  // URL의 page 파라미터를 단일 소스로 사용
+  const currentPage = Number(searchParams.get("page")) || 1;
+  const urlSearchTerm = searchParams.get("search") || "";
+  const urlCustomerClassification = searchParams.get("customer_classification") || "";
+  
   const [companies, setCompanies] = useState<Company[]>([])
   const [stats, setStats] = useState({
     total: 0,
+    potentialCustomers: 0,
     newCustomers: 0,
-    existingCustomers: 0,
-    thisMonthNew: 0
+    existingCustomers: 0
   })
-  const [searchTerm, setSearchTerm] = useState("");
-  const [pendingSearch, setPendingSearch] = useState("");
+  const [searchTerm, setSearchTerm] = useState(urlSearchTerm);
+  const [pendingSearch, setPendingSearch] = useState(urlSearchTerm);
+  const [customerClassification, setCustomerClassification] = useState(urlCustomerClassification);
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [currentPage, setCurrentPage] = useState(initialPage)
   const [totalPages, setTotalPages] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
-  // const [users, setUsers] = useState<User[]>([]);
-
-  // 데이터 로드
-  const loadData = async (page: number = 1) => {
-    try {
-      setLoading(true)
-      setError(null)
-      
-      // 회사 목록과 통계를 병렬로 로드
-      const [companiesData, statsData] = await Promise.all([
-        companyApi.getCompanies({ search: searchTerm, ordering: '-company_code' }, page),
-        companyApi.getCompanyStats()
-      ])
-      
-      setCompanies((companiesData as any).results)
-      setTotalCount(companiesData.count)
-      setTotalPages(Math.ceil(companiesData.count / 10))
-      setStats(statsData)
-    } catch (err) {
-      setError('데이터를 불러오는 중 오류가 발생했습니다.')
-      console.error('Error loading companies:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
 
   // 통계 데이터만 별도로 로드
   const loadStats = async () => {
@@ -68,57 +48,91 @@ export default function CompaniesPage() {
     }
   }
 
-  // 초기 로드
-  useEffect(() => {
-    loadData(currentPage)
-  }, [])
-
-  // 페이지 변경, 검색어 변경 시 회사 목록만 로드
-  useEffect(() => {
-    const loadCompanies = async () => {
-      try {
-        setLoading(true)
-        setError(null)
-        const companiesData = await companyApi.getCompanies({ search: searchTerm, ordering: '-company_code' }, currentPage)
-        setCompanies((companiesData as any).results)
-        setTotalCount(companiesData.count)
-        setTotalPages(Math.ceil(companiesData.count / 10))
-      } catch (err) {
-        setError('데이터를 불러오는 중 오류가 발생했습니다.')
-        console.error('Error loading companies:', err)
-      } finally {
-        setLoading(false)
+  // 회사 목록과 통계를 로드하는 함수
+  const loadCompanies = useCallback(async (page: number, search: string, customerClassification: string) => {
+    try {
+      setLoading(true)
+      setError(null)
+      
+      // 필터 객체 생성
+      const filters: CompanyFilters = {
+        search: search,
+        ordering: '-company_code'
+      };
+      
+      // 고객구분이 선택된 경우에만 필터에 추가
+      if (customerClassification && customerClassification !== "전체") {
+        filters.customer_classification = customerClassification;
       }
+      
+      // 회사 목록과 통계를 병렬로 로드
+      const [companiesData, statsData] = await Promise.all([
+        companyApi.getCompanies(filters, page),
+        companyApi.getCompanyStats()
+      ])
+      
+      setCompanies(companiesData.results)
+      setTotalCount(companiesData.count)
+      setTotalPages(Math.ceil(companiesData.count / 10))
+      setStats(statsData)
+    } catch (err) {
+      setError('데이터를 불러오는 중 오류가 발생했습니다.')
+      console.error('Error loading companies:', err)
+    } finally {
+      setLoading(false)
     }
-    loadCompanies()
-  }, [currentPage, searchTerm])
+  }, []);
 
-  // 페이지네이션, 검색어 쿼리스트링 동기화
+  // URL의 page, searchTerm, customerClassification이 변경될 때마다 데이터 로드 (초기 로드, 브라우저 뒤로가기 포함)
   useEffect(() => {
+    loadCompanies(currentPage, searchTerm, customerClassification);
+  }, [currentPage, searchTerm, customerClassification, loadCompanies]);
+
+  // URL의 search 파라미터가 변경되면 로컬 상태 동기화
+  useEffect(() => {
+    if (urlSearchTerm !== searchTerm) {
+      setSearchTerm(urlSearchTerm);
+      setPendingSearch(urlSearchTerm);
+    }
+  }, [urlSearchTerm, searchTerm]);
+
+  // URL의 customer_classification 파라미터가 변경되면 로컬 상태 동기화
+  useEffect(() => {
+    if (urlCustomerClassification !== customerClassification) {
+      setCustomerClassification(urlCustomerClassification);
+    }
+  }, [urlCustomerClassification, customerClassification]);
+
+  // 페이지 변경 핸들러 (URL만 업데이트)
+  const handlePageChange = (page: number) => {
     const params = new URLSearchParams(searchParams.toString());
-    params.set("page", String(currentPage));
-    if (searchTerm) {
-      params.set("search", searchTerm);
+    params.set("page", String(page));
+    router.replace(`/companies?${params.toString()}`);
+  };
+
+  // 검색 버튼 클릭 핸들러
+  const handleSearch = () => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("page", "1");
+    if (pendingSearch.trim()) {
+      params.set("search", pendingSearch.trim());
     } else {
       params.delete("search");
     }
+    // 고객구분은 이미 URL에 있으므로 그대로 유지 (또는 별도로 설정)
     router.replace(`/companies?${params.toString()}`);
-    // eslint-disable-next-line
-  }, [currentPage, searchTerm]);
+  };
 
-  // 검색 버튼 또는 엔터로만 검색 실행
-  useEffect(() => {
-    if (searchTerm !== "") {
-      const params = new URLSearchParams(searchParams.toString());
-      params.set("page", "1");
-      router.replace(`/companies?${params.toString()}`);
+  // 고객구분 변경 핸들러
+  const handleCustomerClassificationChange = (value: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("page", "1");
+    if (value && value !== "전체") {
+      params.set("customer_classification", value);
+    } else {
+      params.delete("customer_classification");
     }
-    // eslint-disable-next-line
-  }, [searchTerm]);
-
-  const handleSearch = () => {
-    setSearchTerm(pendingSearch);
-    setCurrentPage(1);
+    router.replace(`/companies?${params.toString()}`);
   };
 
   // 데이터 매핑 헬퍼 함수
@@ -129,24 +143,50 @@ export default function CompaniesPage() {
     return company.employee_name || '-';
   }
 
-  const getCompanyType = (company: Company) => {
-    return company.company_type || '-'
-  }
-
   const getCompanyRepresentative = (company: Company) => {
     return company.ceo_name || '-'
-  }
-
-  const getCompanyContact = (company: Company) => {
-    return company.main_phone || company.contact_phone || '-'
   }
 
   const getCompanyCustomerType = (company: Company) => {
     return company.customer_classification || '-'
   }
 
+  const getCompanyCityDistrict = (company: Company) => {
+    return company.city_district || '-'
+  }
+
+  const getCompanySapCodeType = (company: Company) => {
+    return company.sap_code_type || '-'
+  }
+
   const getCompanyStartDate = (company: Company) => {
     return company.transaction_start_date || '-'
+  }
+
+  const getSapCodeBadgeStyle = (sapCodeType: string) => {
+    if (sapCodeType === "매출") {
+      return "bg-black text-white border-black";
+    } else if (sapCodeType === "매입") {
+      return "bg-white text-black border border-gray-300";
+    } else if (sapCodeType === "매입매출") {
+      return "bg-gray-500 text-white border-gray-500";
+    }
+    return "";
+  }
+
+  const getCustomerTypeBadgeStyle = (customerType: string) => {
+    if (customerType === "잠재") {
+      return "bg-yellow-400 text-yellow-950 border-yellow-500 font-semibold";
+    } else if (customerType === "기존") {
+      return "bg-white text-gray-900 border-2 border-gray-400 font-semibold";
+    } else if (customerType === "이탈") {
+      return "bg-red-500 text-white border-red-600 font-semibold";
+    } else if (customerType === "벤더") {
+      return "bg-green-500 text-white border-green-600 font-semibold";
+    } else if (customerType === "신규") {
+      return "bg-blue-500 text-white border-blue-600 font-semibold";
+    }
+    return "";
   }
 
   if (loading && companies.length === 0) {
@@ -165,7 +205,7 @@ export default function CompaniesPage() {
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center">
           <p className="text-red-500 mb-4">{error}</p>
-          <Button onClick={() => loadData(currentPage)}>다시 시도</Button>
+          <Button onClick={() => loadCompanies(currentPage, searchTerm, customerClassification)}>다시 시도</Button>
         </div>
       </div>
     )
@@ -183,47 +223,77 @@ export default function CompaniesPage() {
         </Button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">총 등록 회사</CardTitle>
-            <Building2 className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.total}개사</div>
-          </CardContent>
-        </Card>
+      <TooltipProvider>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Card className="cursor-help">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">총 등록 회사</CardTitle>
+                  <Building2 className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{stats.total}개사</div>
+                </CardContent>
+              </Card>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>전체 등록된 회사 수</p>
+            </TooltipContent>
+          </Tooltip>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">신규 고객사</CardTitle>
-            <Badge className="h-4 w-4" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.newCustomers}개사</div>
-          </CardContent>
-        </Card>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Card className="cursor-help">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">잠재 거래처</CardTitle>
+                  <Badge className="h-4 w-4 bg-yellow-400 text-yellow-950 border-yellow-500" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{stats.potentialCustomers}개사</div>
+                </CardContent>
+              </Card>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>SAP 거래처 등록 전, 컨택 업체</p>
+            </TooltipContent>
+          </Tooltip>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">기존 고객사</CardTitle>
-            <Badge variant="secondary" className="h-4 w-4" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.existingCustomers}개사</div>
-          </CardContent>
-        </Card>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Card className="cursor-help">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">신규 거래처</CardTitle>
+                  <Badge className="h-4 w-4 bg-blue-500 text-white border-blue-600" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{stats.newCustomers}개사</div>
+                </CardContent>
+              </Card>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>SAP 거래처 등록일 기준 3개월 이내 업체</p>
+            </TooltipContent>
+          </Tooltip>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">이번 달 신규</CardTitle>
-            <Plus className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.thisMonthNew}개사</div>
-          </CardContent>
-        </Card>
-      </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Card className="cursor-help">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">기존 거래처</CardTitle>
+                  <Badge variant="secondary" className="h-4 w-4 bg-white text-gray-900 border-2 border-gray-400" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{stats.existingCustomers}개사</div>
+                </CardContent>
+              </Card>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>SAP 등록 거래처</p>
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      </TooltipProvider>
 
       <Card>
         <CardHeader>
@@ -242,6 +312,19 @@ export default function CompaniesPage() {
                 onKeyDown={e => { if (e.key === 'Enter') handleSearch(); }}
               />
             </div>
+            <Select value={customerClassification || "전체"} onValueChange={handleCustomerClassificationChange}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="고객구분 선택" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="전체">전체</SelectItem>
+                <SelectItem value="잠재">잠재</SelectItem>
+                <SelectItem value="신규">신규</SelectItem>
+                <SelectItem value="기존">기존</SelectItem>
+                <SelectItem value="이탈">이탈</SelectItem>
+                <SelectItem value="벤더">벤더</SelectItem>
+              </SelectContent>
+            </Select>
             <Button onClick={handleSearch} variant="default">검색</Button>
             {loading && <Loader2 className="h-4 w-4 animate-spin" />}
           </div>
@@ -249,44 +332,62 @@ export default function CompaniesPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>회사명</TableHead>
-                <TableHead>영업 사원</TableHead>
-                <TableHead>기업형태</TableHead>
-                <TableHead>대표자</TableHead>
-                <TableHead>연락처</TableHead>
                 <TableHead>고객구분</TableHead>
+                <TableHead>회사명</TableHead>
+                <TableHead>시/구</TableHead>
+                <TableHead>대표자</TableHead>
+                <TableHead>영업 사원</TableHead>
+                <TableHead>SAP코드여부</TableHead>
                 <TableHead>거래개시일</TableHead>
-                <TableHead>작업</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {companies.map((company) => (
-                <TableRow key={company.company_code}>
+                <TableRow 
+                  key={company.company_code}
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => {
+                    const params = new URLSearchParams();
+                    params.set("page", String(currentPage));
+                    if (searchTerm) params.set("search", searchTerm);
+                    if (customerClassification) params.set("customer_classification", customerClassification);
+                    router.push(`/companies/${company.company_code}?${params.toString()}`);
+                  }}
+                >
+                  <TableCell>
+                    {(() => {
+                      const customerType = getCompanyCustomerType(company);
+                      const badgeStyle = getCustomerTypeBadgeStyle(customerType);
+                      return (
+                        <Badge 
+                          variant="outline"
+                          className={badgeStyle || undefined}
+                        >
+                          {customerType}
+                        </Badge>
+                      );
+                    })()}
+                  </TableCell>
                   <TableCell className="font-medium">
                     {getCompanyDisplayName(company)}
                   </TableCell>
-                  <TableCell>{getSalesPersonName(company)}</TableCell>
-                  <TableCell>{getCompanyType(company)}</TableCell>
+                  <TableCell>{getCompanyCityDistrict(company)}</TableCell>
                   <TableCell>{getCompanyRepresentative(company)}</TableCell>
+                  <TableCell>{getSalesPersonName(company)}</TableCell>
                   <TableCell>
-                    <div className="flex items-center space-x-1">
-                      <Phone className="h-3 w-3" />
-                      <span className="text-sm">{getCompanyContact(company)}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={getCompanyCustomerType(company) === "신규" ? "default" : "secondary"}>
-                      {getCompanyCustomerType(company)}
-                    </Badge>
+                    {(() => {
+                      const sapCodeType = getCompanySapCodeType(company);
+                      return (
+                        <Badge 
+                          variant={sapCodeType === '-' ? "secondary" : "outline"}
+                          className={getSapCodeBadgeStyle(sapCodeType) || undefined}
+                        >
+                          {sapCodeType}
+                        </Badge>
+                      );
+                    })()}
                   </TableCell>
                   <TableCell>{getCompanyStartDate(company)}</TableCell>
-                  <TableCell>
-                    <Button variant="ghost" size="sm" asChild>
-                      <Link href={`/companies/${company.company_code}`}>
-                        <Eye className="h-4 w-4" />
-                      </Link>
-                    </Button>
-                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -308,7 +409,7 @@ export default function CompaniesPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  onClick={() => handlePageChange(Math.max(currentPage - 1, 1))}
                   disabled={currentPage === 1}
                 >
                   <ChevronLeft className="h-4 w-4" />
@@ -333,7 +434,7 @@ export default function CompaniesPage() {
                         key={pageNum}
                         variant={currentPage === pageNum ? "default" : "outline"}
                         size="sm"
-                        onClick={() => setCurrentPage(pageNum)}
+                        onClick={() => handlePageChange(pageNum)}
                         className="w-8 h-8 p-0"
                       >
                         {pageNum}
@@ -345,13 +446,13 @@ export default function CompaniesPage() {
                 <PaginationInput
                   currentPage={currentPage}
                   totalPages={totalPages}
-                  onPageChange={setCurrentPage}
+                  onPageChange={handlePageChange}
                 />
                 
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  onClick={() => handlePageChange(Math.min(currentPage + 1, totalPages))}
                   disabled={currentPage === totalPages}
                 >
                   다음

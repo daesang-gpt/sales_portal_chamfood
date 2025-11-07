@@ -17,6 +17,7 @@ import { ko } from "date-fns/locale"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { salesReportApi, companyApi } from "@/lib/api"
+import type { CreateSalesReportData } from "@/lib/types"
 import { getUserFromToken } from "@/lib/auth"
 import dynamic from "next/dynamic"
 import { fetchRecommendedTags } from '@/lib/api'
@@ -75,9 +76,9 @@ export default function NewSalesReportPage() {
           .sort((a, b) => a.localeCompare(b, 'ko')); // 한국어 가나다순 정렬
         setProductSuggestions(uniqueProducts);
         
-        // 사용품목 입력칸에 자동으로 채우기 (각 상품마다 줄바꿈)
+        // 사용품목 입력칸에 자동으로 채우기 (각 상품마다 띄어쓰기로 구분)
         if (uniqueProducts.length > 0) {
-          setFormData(prev => ({ ...prev, products: uniqueProducts.join(',\n') }));
+          setFormData(prev => ({ ...prev, products: uniqueProducts.join(', ') }));
         }
       } catch (err) {
         console.error('상품명 조회 오류:', err);
@@ -150,7 +151,7 @@ export default function NewSalesReportPage() {
         
         // 신규 회사 자동 생성 (소재지 함께 저장)
         try {
-          const company = await companyApi.autoCreateCompany(formData.company);
+          const company = await companyApi.autoCreateCompany(formData.company, formData.location);
           companyCode = company.company_code; // Primary Key 문자열
           // 소재지는 백엔드에서 자동으로 저장됨
         } catch (err) {
@@ -161,7 +162,7 @@ export default function NewSalesReportPage() {
       }
 
       // date는 이미 위에서 검증되었으므로 non-null assertion 사용
-      const reportData = {
+      const reportData: CreateSalesReportData = {
         visitDate: date!.toISOString().split('T')[0], // YYYY-MM-DD 형식
         company: formData.company,
         company_obj: companyCode || null, // backend expects company_code (string) as PK
@@ -223,17 +224,17 @@ export default function NewSalesReportPage() {
       <Card>
         <CardHeader>
           <CardTitle>새 영업일지</CardTitle>
-          <CardDescription>영업 활동 내용을 상세히 기록해주세요.</CardDescription>
+          <CardDescription>영업 활동 내용을 상세히 기록해주세요. * 표기는 필수 입력 항목입니다.</CardDescription>
         </CardHeader>
         <CardContent>
 
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* 1. 방문일자 */}
-            <div className="space-y-2">
-              <Label>방문일자 *</Label>
+            <div className="space-y-2 max-w-md">
+              <Label className="text-sm font-semibold text-foreground">방문일자 *</Label>
               <Popover>
                 <PopoverTrigger asChild>
-                  <Button variant="outline" className="w-full justify-start text-left font-normal bg-transparent">
+                  <Button variant="outline" className="w-full justify-start text-left font-normal">
                     <CalendarIcon className="mr-2 h-4 w-4" />
                     {date ? format(date, "PPP", { locale: ko }) : "날짜를 선택하세요"}
                   </Button>
@@ -245,8 +246,8 @@ export default function NewSalesReportPage() {
             </div>
 
             {/* 2. 회사명 */}
-            <div className="space-y-2">
-              <Label>회사명 *</Label>
+            <div className="space-y-2 max-w-md">
+              <Label className="text-sm font-semibold text-foreground">회사명 *</Label>
               <CompanySearchInput
                 value={formData.company}
                 selectedCompanyId={formData.company_obj}
@@ -255,25 +256,11 @@ export default function NewSalesReportPage() {
               />
             </div>
 
-            {/* 2-1. 소재지 (신규 회사만) */}
-            {!formData.company_obj && formData.company && (
-              <div className="space-y-2">
-                <Label>소재지 (신규 회사) *</Label>
-                <LocationSelect
-                  value={formData.location}
-                  onChange={(value) => handleInputChange("location", value)}
-                  placeholder="지역을 선택하세요"
-                  required
-                />
-              </div>
-            )}
-
-            {/* 3. 영업형태 */}
             {/* 3-0. 영업단계 */}
-            <div className="space-y-2">
-              <Label>영업단계</Label>
+            <div className="space-y-2 max-w-md">
+              <Label className="text-sm font-semibold text-foreground">영업단계</Label>
               <Select value={formData.sales_stage || undefined} onValueChange={(value) => handleInputChange("sales_stage", value)}>
-                <SelectTrigger>
+                <SelectTrigger className="w-full">
                   <SelectValue placeholder="영업단계를 선택하세요" />
                 </SelectTrigger>
                 <SelectContent>
@@ -287,10 +274,10 @@ export default function NewSalesReportPage() {
             </div>
 
             {/* 4. 영업형태 */}
-            <div className="space-y-2">
-              <Label>영업형태 *</Label>
+            <div className="space-y-2 max-w-md">
+              <Label className="text-sm font-semibold text-foreground">영업형태 *</Label>
               <Select value={formData.type || undefined} onValueChange={(value) => handleInputChange("type", value)}>
-                <SelectTrigger>
+                <SelectTrigger className="w-full">
                   <SelectValue placeholder="영업형태를 선택하세요" />
                 </SelectTrigger>
                 <SelectContent>
@@ -302,9 +289,22 @@ export default function NewSalesReportPage() {
               </Select>
             </div>
 
+            {/* 2-1. 소재지 (신규 회사만) */}
+            {!formData.company_obj && formData.company && (
+              <div className="space-y-2 max-w-md">
+                <Label className="text-sm font-semibold text-foreground">소재지 (신규 회사) *</Label>
+                <LocationSelect
+                  value={formData.location}
+                  onChange={(value) => handleInputChange("location", value)}
+                  placeholder="지역을 선택하세요"
+                  required
+                />
+              </div>
+            )}
+
             {/* 5. 사용품목 */}
             <div className="space-y-2">
-              <Label htmlFor="products">사용품목</Label>
+              <Label htmlFor="products" className="text-sm font-semibold text-foreground">사용품목</Label>
               <Textarea
                 id="products"
                 value={formData.products || ''}
@@ -317,20 +317,21 @@ export default function NewSalesReportPage() {
 
             {/* 6. 미팅 내용 */}
             <div className="space-y-2">
-              <Label htmlFor="content">미팅 내용 (이슈사항) *</Label>
+              <Label htmlFor="content" className="text-sm font-semibold text-foreground">미팅 내용 (이슈사항) *</Label>
               <Textarea
                 id="content"
                 value={formData.content}
                 onChange={(e) => handleInputChange("content", e.target.value)}
                 placeholder="영업 활동 내용을 상세히 기록해주세요..."
                 rows={6}
+                className="resize-none"
               />
             </div>
 
             {/* 7. 태그 (키워드) */}
             <div className="space-y-2">
               <div className="flex items-center gap-2">
-                <Label htmlFor="tags">태그 (키워드)</Label>
+                <Label htmlFor="tags" className="text-sm font-semibold text-foreground">태그 (키워드)</Label>
                 <Button type="button" variant="secondary" size="sm" onClick={handleRecommendTags} disabled={tagLoading}>
                   {tagLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                   키워드 추출

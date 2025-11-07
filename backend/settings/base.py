@@ -20,6 +20,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'myapi',
     'corsheaders',
+    'django_crontab',
 ]
 
 MIDDLEWARE = [
@@ -137,4 +138,13 @@ PASSWORD_HASHERS = [
     'django.contrib.auth.hashers.Argon2PasswordHasher',
     'django.contrib.auth.hashers.ScryptPasswordHasher',
 ]
+
+# Cron jobs 설정
+# 매일 새벽 2시에 고객 구분 자동 업데이트 실행
+CRONJOBS = [
+    ('0 2 * * *', 'myapi.cron.update_customer_classifications', '>> /tmp/customer_classification_update.log 2>&1'),
+]
+# Windows 개발 환경에서는 로그 파일 경로를 조정해야 할 수 있음
+# Windows: '>> C:\\temp\\customer_classification_update.log 2>&1'
+# Linux: '>> /tmp/customer_classification_update.log 2>&1'
 

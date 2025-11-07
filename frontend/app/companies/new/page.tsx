@@ -14,6 +14,8 @@ import Link from "next/link"
 import { companyApi, Company } from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
 import { LocationSelect } from "@/components/ui/location-select"
+import { SapCodeSelect } from "@/components/ui/sap-code-select"
+import { bizCodes, departmentCodes, employeeCodes, distributionTypeCodes, paymentTerms } from "@/lib/constants/sapCodes"
 
 export default function NewCompanyPage() {
   const router = useRouter()
@@ -25,10 +27,9 @@ export default function NewCompanyPage() {
   
   const [formData, setFormData] = useState({
     // 필수 필드
-    company_code: "",
     company_name: "",
     // 기본정보
-    customer_classification: "" as '기존' | '신규' | '이탈' | '기타' | '',
+    customer_classification: "" as '잠재' | '신규' | '기존' | '이탈' | '벤더' | '',
     company_type: "" as '개인' | '법인' | '',
     tax_id: "",
     established_date: "",
@@ -91,15 +92,6 @@ export default function NewCompanyPage() {
     e.preventDefault()
     
     // 필수 필드 검증
-    if (!formData.company_code.trim()) {
-      toast({
-        title: "오류",
-        description: "회사코드는 필수 입력 항목입니다.",
-        variant: "destructive"
-      })
-      return
-    }
-
     if (!formData.company_name.trim()) {
       toast({
         title: "오류",
@@ -113,10 +105,11 @@ export default function NewCompanyPage() {
       setLoading(true)
       
       // 빈 문자열을 undefined로 변환하여 API에 전송하지 않음
+      // company_code는 제외 (백엔드에서 자동 생성)
       const cleanData: any = {}
       Object.keys(formData).forEach(key => {
         const value = formData[key as keyof typeof formData]
-        if (value !== '' && value !== null) {
+        if (key !== 'company_code' && value !== '' && value !== null) {
           cleanData[key] = value
         }
       })
@@ -163,18 +156,7 @@ export default function NewCompanyPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="company_code">회사코드 *</Label>
-                <Input
-                  id="company_code"
-                  value={formData.company_code}
-                  onChange={(e) => handleInputChange("company_code", e.target.value)}
-                  placeholder="예: C0000001"
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="company_name">회사명 *</Label>
+                <Label htmlFor="company_name" className="text-sm font-semibold text-foreground">회사명 *</Label>
                 <Input
                   id="company_name"
                   value={formData.company_name}
@@ -185,22 +167,23 @@ export default function NewCompanyPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="customer_classification">고객분류</Label>
+                <Label htmlFor="customer_classification" className="text-sm font-semibold text-foreground">고객분류</Label>
                 <Select value={formData.customer_classification || undefined} onValueChange={(value) => handleInputChange("customer_classification", value)}>
                   <SelectTrigger>
                     <SelectValue placeholder="고객분류를 선택하세요" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="기존">기존</SelectItem>
+                    <SelectItem value="잠재">잠재</SelectItem>
                     <SelectItem value="신규">신규</SelectItem>
+                    <SelectItem value="기존">기존</SelectItem>
                     <SelectItem value="이탈">이탈</SelectItem>
-                    <SelectItem value="기타">기타</SelectItem>
+                    <SelectItem value="벤더">벤더</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="company_type">회사유형</Label>
+                <Label htmlFor="company_type" className="text-sm font-semibold text-foreground">회사유형</Label>
                 <Select value={formData.company_type || undefined} onValueChange={(value) => handleInputChange("company_type", value)}>
                   <SelectTrigger>
                     <SelectValue placeholder="회사유형을 선택하세요" />
@@ -213,7 +196,7 @@ export default function NewCompanyPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="tax_id">사업자등록번호</Label>
+                <Label htmlFor="tax_id" className="text-sm font-semibold text-foreground">사업자등록번호</Label>
                 <Input
                   id="tax_id"
                   value={formData.tax_id}
@@ -223,7 +206,7 @@ export default function NewCompanyPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="established_date">설립일</Label>
+                <Label htmlFor="established_date" className="text-sm font-semibold text-foreground">설립일</Label>
                 <Input
                   id="established_date"
                   type="date"
@@ -233,7 +216,7 @@ export default function NewCompanyPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="ceo_name">대표자명</Label>
+                <Label htmlFor="ceo_name" className="text-sm font-semibold text-foreground">대표자명</Label>
                 <Input
                   id="ceo_name"
                   value={formData.ceo_name}
@@ -243,7 +226,7 @@ export default function NewCompanyPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="head_address">본사 주소</Label>
+                <Label htmlFor="head_address" className="text-sm font-semibold text-foreground">본사 주소</Label>
                 <Textarea
                   id="head_address"
                   value={formData.head_address}
@@ -254,7 +237,7 @@ export default function NewCompanyPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="city_district">시/구</Label>
+                <Label htmlFor="city_district" className="text-sm font-semibold text-foreground">시/구</Label>
                 <LocationSelect
                   value={formData.city_district}
                   onChange={(value) => handleInputChange("city_district", value)}
@@ -263,7 +246,7 @@ export default function NewCompanyPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="processing_address">공장 주소</Label>
+                <Label htmlFor="processing_address" className="text-sm font-semibold text-foreground">공장 주소</Label>
                 <Textarea
                   id="processing_address"
                   value={formData.processing_address}
@@ -274,7 +257,7 @@ export default function NewCompanyPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="main_phone">대표전화</Label>
+                <Label htmlFor="main_phone" className="text-sm font-semibold text-foreground">대표전화</Label>
                 <Input
                   id="main_phone"
                   value={formData.main_phone}
@@ -284,7 +267,7 @@ export default function NewCompanyPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="industry_name">업종명</Label>
+                <Label htmlFor="industry_name" className="text-sm font-semibold text-foreground">업종명</Label>
                 <Input
                   id="industry_name"
                   value={formData.industry_name}
@@ -294,7 +277,7 @@ export default function NewCompanyPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="products">주요제품</Label>
+                <Label htmlFor="products" className="text-sm font-semibold text-foreground">주요제품</Label>
                 <Textarea
                   id="products"
                   value={formData.products}
@@ -305,7 +288,7 @@ export default function NewCompanyPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="website">웹사이트</Label>
+                <Label htmlFor="website" className="text-sm font-semibold text-foreground">웹사이트</Label>
                 <Input
                   id="website"
                   value={formData.website}
@@ -315,7 +298,7 @@ export default function NewCompanyPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="remarks">참고사항</Label>
+                <Label htmlFor="remarks" className="text-sm font-semibold text-foreground">참고사항</Label>
                 <Textarea
                   id="remarks"
                   value={formData.remarks}
@@ -335,7 +318,7 @@ export default function NewCompanyPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label>SAP코드여부</Label>
+                <Label className="text-sm font-semibold text-foreground">SAP코드여부</Label>
                 <div className="flex items-center space-x-4">
                   <div className="flex items-center space-x-2">
                     <Checkbox
@@ -365,7 +348,7 @@ export default function NewCompanyPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="company_code_sap">SAP거래처코드</Label>
+                <Label htmlFor="company_code_sap" className="text-sm font-semibold text-foreground">SAP거래처코드</Label>
                 <Input
                   id="company_code_sap"
                   value={formData.company_code_sap}
@@ -374,88 +357,52 @@ export default function NewCompanyPage() {
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="biz_code">사업</Label>
-                <Input
-                  id="biz_code"
-                  value={formData.biz_code}
-                  onChange={(e) => handleInputChange("biz_code", e.target.value)}
-                  placeholder="사업 코드를 입력하세요"
-                />
-              </div>
+              <SapCodeSelect
+                options={bizCodes}
+                codeValue={formData.biz_code}
+                nameValue={formData.biz_name}
+                onCodeChange={(code) => handleInputChange("biz_code", code)}
+                onNameChange={(name) => handleInputChange("biz_name", name)}
+                codeLabel="사업"
+                nameLabel="사업부"
+                namePlaceholder="사업부를 선택하세요"
+              />
+
+              <SapCodeSelect
+                options={departmentCodes}
+                codeValue={formData.department_code}
+                nameValue={formData.department}
+                onCodeChange={(code) => handleInputChange("department_code", code)}
+                onNameChange={(name) => handleInputChange("department", name)}
+                codeLabel="지점/팀"
+                nameLabel="팀명"
+                namePlaceholder="팀명을 선택하세요"
+              />
+
+              <SapCodeSelect
+                options={employeeCodes}
+                codeValue={formData.employee_number}
+                nameValue={formData.employee_name}
+                onCodeChange={(code) => handleInputChange("employee_number", code)}
+                onNameChange={(name) => handleInputChange("employee_name", name)}
+                codeLabel="사원번호"
+                nameLabel="영업 사원"
+                namePlaceholder="영업 사원을 선택하세요"
+              />
+
+              <SapCodeSelect
+                options={distributionTypeCodes}
+                codeValue={formData.distribution_type_sap_code}
+                nameValue={formData.distribution_type_sap}
+                onCodeChange={(code) => handleInputChange("distribution_type_sap_code", code)}
+                onNameChange={(name) => handleInputChange("distribution_type_sap", name)}
+                codeLabel="유통형태코드"
+                nameLabel="유통형태"
+                namePlaceholder="유통형태를 선택하세요"
+              />
 
               <div className="space-y-2">
-                <Label htmlFor="biz_name">사업부</Label>
-                <Input
-                  id="biz_name"
-                  value={formData.biz_name}
-                  onChange={(e) => handleInputChange("biz_name", e.target.value)}
-                  placeholder="사업부명을 입력하세요"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="department_code">지점/팀</Label>
-                <Input
-                  id="department_code"
-                  value={formData.department_code}
-                  onChange={(e) => handleInputChange("department_code", e.target.value)}
-                  placeholder="지점/팀 코드를 입력하세요"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="department">팀명</Label>
-                <Input
-                  id="department"
-                  value={formData.department}
-                  onChange={(e) => handleInputChange("department", e.target.value)}
-                  placeholder="팀명을 입력하세요"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="employee_number">사원번호</Label>
-                <Input
-                  id="employee_number"
-                  value={formData.employee_number}
-                  onChange={(e) => handleInputChange("employee_number", e.target.value)}
-                  placeholder="사원번호를 입력하세요"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="employee_name">영업 사원</Label>
-                <Input
-                  id="employee_name"
-                  value={formData.employee_name}
-                  onChange={(e) => handleInputChange("employee_name", e.target.value)}
-                  placeholder="영업 사원명을 입력하세요"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="distribution_type_sap_code">유통형태코드</Label>
-                <Input
-                  id="distribution_type_sap_code"
-                  value={formData.distribution_type_sap_code}
-                  onChange={(e) => handleInputChange("distribution_type_sap_code", e.target.value)}
-                  placeholder="유통형태코드를 입력하세요"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="distribution_type_sap">유통형태</Label>
-                <Input
-                  id="distribution_type_sap"
-                  value={formData.distribution_type_sap}
-                  onChange={(e) => handleInputChange("distribution_type_sap", e.target.value)}
-                  placeholder="유통형태를 입력하세요"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="contact_person">거래처 담당자</Label>
+                <Label htmlFor="contact_person" className="text-sm font-semibold text-foreground">거래처 담당자</Label>
                 <Input
                   id="contact_person"
                   value={formData.contact_person}
@@ -465,7 +412,7 @@ export default function NewCompanyPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="contact_phone">담당자 연락처</Label>
+                <Label htmlFor="contact_phone" className="text-sm font-semibold text-foreground">담당자 연락처</Label>
                 <Input
                   id="contact_phone"
                   value={formData.contact_phone}
@@ -475,7 +422,7 @@ export default function NewCompanyPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="code_create_date">코드생성일</Label>
+                <Label htmlFor="code_create_date" className="text-sm font-semibold text-foreground">코드생성일</Label>
                 <Input
                   id="code_create_date"
                   type="date"
@@ -485,7 +432,7 @@ export default function NewCompanyPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="transaction_start_date">거래시작일</Label>
+                <Label htmlFor="transaction_start_date" className="text-sm font-semibold text-foreground">거래시작일</Label>
                 <Input
                   id="transaction_start_date"
                   type="date"
@@ -495,13 +442,22 @@ export default function NewCompanyPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="payment_terms">결제조건</Label>
-                <Input
-                  id="payment_terms"
-                  value={formData.payment_terms}
-                  onChange={(e) => handleInputChange("payment_terms", e.target.value)}
-                  placeholder="결제조건을 입력하세요"
-                />
+                <Label htmlFor="payment_terms" className="text-sm font-semibold text-foreground">결제조건</Label>
+                <Select 
+                  value={formData.payment_terms || undefined} 
+                  onValueChange={(value) => handleInputChange("payment_terms", value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="결제조건을 선택하세요" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {paymentTerms.map((term) => (
+                      <SelectItem key={term} value={term}>
+                        {term}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </CardContent>
           </Card>

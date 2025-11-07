@@ -10,6 +10,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useState } from "react"
 import { salesReportApi, SalesReport } from "@/lib/api"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { getUserFromToken, isAdmin } from "@/lib/auth"
 
 export default function SalesReportDetailPage() {
   const params = useParams()
@@ -24,17 +25,37 @@ export default function SalesReportDetailPage() {
   const [showAll, setShowAll] = useState(false)
   const [otherLoading, setOtherLoading] = useState(false)
   const [otherError, setOtherError] = useState<string | null>(null)
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null)
+  const [canEdit, setCanEdit] = useState(false)
+
+  useEffect(() => {
+    // 현재 사용자 정보 가져오기
+    const currentUser = getUserFromToken()
+    if (currentUser) {
+      setCurrentUserId(currentUser.id)
+    }
+  }, [])
 
   useEffect(() => {
     const fetchReport = async () => {
       try {
         setLoading(true)
         const reportData = await salesReportApi.getReport(Number(params.id))
-        console.log('[영업일지 상세] 영업일지 데이터:', reportData);
-        console.log('[영업일지 상세] company_code:', reportData.company_code);
-        console.log('[영업일지 상세] company_code_resolved:', (reportData as any).company_code_resolved);
-        console.log('[영업일지 상세] company_obj:', (reportData as any).company_obj);
+        if (process.env.NODE_ENV === 'development') {
+          console.log('[영업일지 상세] 영업일지 데이터:', reportData);
+          console.log('[영업일지 상세] company_code:', reportData.company_code);
+          console.log('[영업일지 상세] company_code_resolved:', reportData.company_code_resolved);
+          console.log('[영업일지 상세] company_obj:', reportData.company_obj);
+        }
         setReport(reportData)
+        
+        // 권한 확인: 작성자이거나 관리자인지 확인
+        const currentUser = getUserFromToken()
+        if (currentUser) {
+          const isAuthor = reportData.author === currentUser.id
+          const isAdminUser = isAdmin()
+          setCanEdit(isAuthor || isAdminUser)
+        }
       } catch (err) {
         console.error('[영업일지 상세] 오류:', err);
         setError(err instanceof Error ? err.message : '영업일지를 불러오는데 실패했습니다.')
@@ -54,7 +75,7 @@ export default function SalesReportDetailPage() {
       if (!report) return;
       
       // company_code 확인 (다양한 필드에서 시도)
-      const companyCode = report.company_code || (report as any).company_code_resolved || null;
+      const companyCode = report.company_code || report.company_code_resolved || null;
       if (!companyCode) {
         console.warn('영업일지에 company_code가 없습니다:', report);
         setOtherError("회사 정보를 찾을 수 없어 영업일지 리스트를 불러올 수 없습니다.")
@@ -71,8 +92,10 @@ export default function SalesReportDetailPage() {
           ordering: "-visitDate",
           page_size: 100, // 충분히 크게 받아서 10개만 보여줌
         })
-        console.log('영업일지 리스트 응답:', data);
-        setOtherReports((data as any).results || [])
+        if (process.env.NODE_ENV === 'development') {
+          console.log('영업일지 리스트 응답:', data);
+        }
+        setOtherReports(data.results || [])
       } catch (err) {
         console.error('영업일지 리스트 조회 오류:', err);
         setOtherError("같은 회사의 영업일지를 불러오는 중 오류가 발생했습니다.")
@@ -170,26 +193,28 @@ export default function SalesReportDetailPage() {
           </Button>
           <h1 className="text-3xl font-bold">영업일지 상세</h1>
         </div>
-        <div className="flex space-x-2">
-          <Button 
-            variant="destructive" 
-            onClick={handleDelete}
-            disabled={deleting}
-          >
-            {deleting ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Trash2 className="mr-2 h-4 w-4" />
-            )}
-            삭제
-          </Button>
-          <Button asChild>
-            <Link href={`/sales-reports/${report.id}/edit?page=${page}`}>
-              <Edit className="mr-2 h-4 w-4" />
-              수정
-            </Link>
-          </Button>
-        </div>
+        {canEdit && (
+          <div className="flex space-x-2">
+            <Button 
+              variant="destructive" 
+              onClick={handleDelete}
+              disabled={deleting}
+            >
+              {deleting ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="mr-2 h-4 w-4" />
+              )}
+              삭제
+            </Button>
+            <Button asChild>
+              <Link href={`/sales-reports/${report.id}/edit?page=${page}`}>
+                <Edit className="mr-2 h-4 w-4" />
+                수정
+              </Link>
+            </Button>
+          </div>
+        )}
       </div>
 
       <Card id="sales-report-content">
@@ -209,7 +234,7 @@ export default function SalesReportDetailPage() {
             </div>
             <div className="flex items-center gap-2">
               <Badge variant={report.type === "대면" ? "default" : "secondary"}>{report.type}</Badge>
-              <Badge variant="outline">{(report as any).sales_stage || '미지정'}</Badge>
+              <Badge variant="outline">{report.sales_stage || '미지정'}</Badge>
             </div>
           </div>
           <CardDescription className="text-base">
@@ -282,18 +307,18 @@ export default function SalesReportDetailPage() {
                   {(showAll ? otherReports : otherReports.slice(0, 10)).map((r) => {
                     const isCurrent = r.id === report.id
                     return (
-                      <TableRow key={r.id} className={isCurrent ? "bg-gray-200 font-semibold" : "hover:bg-gray-50 cursor-pointer"} onClick={() => !isCurrent && router.push(`/sales-reports/${r.id}`)}>
+                      <TableRow key={r.id} className={isCurrent ? "bg-gray-200 font-semibold" : "hover:bg-gray-50 cursor-pointer"} onClick={() => !isCurrent && router.push(`/sales-reports/${r.id}?page=${page}`)}>
                         <TableCell>{new Date(r.visitDate).toLocaleDateString('ko-KR')}</TableCell>
                         <TableCell>
                           <Badge 
                             variant="outline" 
-                            className={`${getSalesStageStyle((r as any).sales_stage)} border`}
+                            className={`${getSalesStageStyle(r.sales_stage)} border`}
                           >
-                            {(r as any).sales_stage || '미지정'}
+                            {r.sales_stage || '미지정'}
                           </Badge>
                         </TableCell>
                         <TableCell>{r.content.slice(0, 40)}{r.content.length > 40 ? '...' : ''}</TableCell>
-                        <TableCell>{(r as any).author_name || ''}</TableCell>
+                        <TableCell>{r.author_name || ''}</TableCell>
                         <TableCell>
                           <Badge variant={r.type === "대면" ? "default" : "secondary"}>{r.type}</Badge>
                         </TableCell>

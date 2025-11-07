@@ -1,29 +1,59 @@
+// 타입 정의는 lib/types에서 import
+import type {
+  SalesReport,
+  Company,
+  CompanyFilters,
+  CompanyFinancialStatus,
+  PaginatedResponse,
+  CompanyStats,
+  CompanySuggestion,
+  CompanyUniqueProducts,
+  CompanySalesData,
+  CreateSalesReportData,
+  UpdateSalesReportData,
+  SalesReportParams,
+} from '@/lib/types';
+
 // 환경에 따른 API URL 설정
 const getApiBaseUrl = () => {
+  // 환경 변수 우선 사용
+  if (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  
   // 브라우저 환경에서 현재 호스트 확인
   if (typeof window !== 'undefined') {
     const hostname = window.location.hostname;
     const port = window.location.port;
     
-    console.log('[API] Current hostname:', hostname, 'port:', port);
+    // 개발 환경에서만 로그 출력
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[API] Current hostname:', hostname, 'port:', port);
+    }
     
     // localhost나 127.0.0.1인 경우
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
       const apiUrl = 'http://127.0.0.1:8000/api';
-      console.log('[API] Using development API URL:', apiUrl);
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[API] Using development API URL:', apiUrl);
+      }
       return apiUrl;
     }
     
     // 172.28.x.x 같은 내부 IP인 경우 같은 호스트의 8000 포트 사용
     if (hostname.startsWith('172.28.') || hostname.startsWith('192.168.')) {
       const apiUrl = `http://${hostname}:8000/api`;
-      console.log('[API] Using internal network API URL:', apiUrl);
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[API] Using internal network API URL:', apiUrl);
+      }
       return apiUrl;
     }
     
     // 그 외의 경우 운영 환경으로 간주
     const apiUrl = 'http://192.168.99.37:8000/api';
-    console.log('[API] Using production API URL:', apiUrl);
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[API] Using production API URL:', apiUrl);
+    }
     return apiUrl;
   }
   
@@ -33,78 +63,18 @@ const getApiBaseUrl = () => {
 
 const API_BASE_URL = getApiBaseUrl();
 
-export interface SalesReport {
-  id: number;
-  author: number;  // User ID
-  author_name: string;
-  author_department: string;
-  visitDate: string;
-  company_name?: string | null;  // 회사명
-  company_code?: string | null;  // 회사 코드(Primary Key)
-  company_obj?: string | null;  // 회사 객체 ID (company_code)
-  company_display?: string;  // 표시용 회사명 (옵션)
-  sales_stage?: string;  // 영업단계
-  type: string;
-  products: string;
-  content: string;
-  tags: string;
-  createdAt: string;
-}
+// API URL을 다른 곳에서도 사용할 수 있도록 export
+export { getApiBaseUrl };
+export const API_URL = API_BASE_URL;
 
-// 새로운 Company 타입 (TSV 데이터 구조에 맞춤)
-export interface Company {
-  company_code: string; // Primary Key
-  company_name: string;
-  // 기본정보
-  customer_classification?: '기존' | '신규' | '이탈' | '기타';
-  company_type?: '개인' | '법인';
-  tax_id?: string;
-  established_date?: string;
-  ceo_name?: string;
-  head_address?: string;
-  city_district?: string;
-  processing_address?: string;
-  main_phone?: string;
-  industry_name?: string;
-  products?: string;
-  website?: string;
-  remarks?: string;
-  // SAP정보
-  sap_code_type?: string;
-  company_code_sap?: string;
-  biz_code?: string;
-  biz_name?: string;
-  department_code?: string;
-  department?: string;
-  employee_number?: string;
-  employee_name?: string;
-  distribution_type_sap_code?: string;
-  distribution_type_sap?: string;
-  contact_person?: string;
-  contact_phone?: string;
-  code_create_date?: string;
-  transaction_start_date?: string;
-  payment_terms?: string;
-}
-
-export interface CompanyFilters {
-  search?: string;
-  customer_classification?: string;
-  industry_name?: string;
-  ordering?: string;
-}
-
-export interface CompanyFinancialStatus {
-  id: number;
-  company: number;
-  fiscal_year: string;
-  total_assets: number;
-  capital: number;
-  total_equity: number;
-  revenue: number;
-  operating_income: number;
-  net_income: number;
-}
+// 타입 재export (하위 호환성 유지)
+export type {
+  SalesReport,
+  Company,
+  CompanyFilters,
+  CompanyFinancialStatus,
+  PaginatedResponse,
+};
 
 // API 호출 헬퍼 함수
 async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -118,16 +88,18 @@ async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<
   };
 
   // 시작 헤더 병합 (사용자 지정 헤더 우선)
+  const optionsHeaders = options.headers as Record<string, string> | undefined;
   let headers: HeadersInit = {
     ...baseHeaders,
-    ...(options.headers as any),
+    ...(optionsHeaders || {}),
   };
 
   // Content-Type은 다음 조건에서만 자동 설정
   // - 메서드가 GET/HEAD가 아님
   // - body가 FormData가 아님 (브라우저가 자동 설정)
   // - 사용자가 이미 Content-Type을 지정하지 않음
-  const hasContentType = !!(headers as any)['Content-Type'] || !!(headers as any)['content-type'];
+  const headersRecord = headers as Record<string, string>;
+  const hasContentType = !!(headersRecord['Content-Type'] || headersRecord['content-type']);
   if (method !== 'GET' && method !== 'HEAD' && !isFormData && !hasContentType) {
     headers = { 'Content-Type': 'application/json', ...headers };
   }
@@ -138,10 +110,15 @@ async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<
   };
 
   const url = `${API_BASE_URL}${endpoint}`;
-  console.log('[API] Making request to:', url, 'Method:', method);
+  // 개발 환경에서만 로그 출력
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[API] Making request to:', url, 'Method:', method);
+  }
   try {
     const response = await fetch(url, config);
-    console.log('[API] Response status:', response.status, 'for', endpoint);
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[API] Response status:', response.status, 'for', endpoint);
+    }
   
     if (!response.ok) {
       console.error(`[API] 호출 실패: ${response.status} - ${endpoint}`);
@@ -166,7 +143,8 @@ async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<
       
       // JWT 토큰 만료 처리
       if (response.status === 401 && errorData && typeof errorData === 'object') {
-        const errorDetail = (errorData as any).detail || (errorData as any).error || '';
+        const errorObj = errorData as Record<string, unknown>;
+        const errorDetail = (errorObj.detail || errorObj.error || '') as string;
         if (errorDetail.includes('Given token not valid for any token type') || 
             errorDetail.includes('token_not_valid') ||
             errorDetail.includes('Token is invalid or expired')) {
@@ -189,8 +167,11 @@ async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<
       }
       
       // 백엔드에서 error 필드를 보낸 경우, 해당 메시지만 사용
-      if (errorData && typeof errorData === 'object' && (errorData as any).error) {
-        throw new Error((errorData as any).error);
+      if (errorData && typeof errorData === 'object') {
+        const errorObj = errorData as Record<string, unknown>;
+        if (errorObj.error) {
+          throw new Error(String(errorObj.error));
+        }
       }
       
       // error 필드가 없는 경우, 기본 HTTP 상태 메시지 사용 
@@ -220,7 +201,7 @@ async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<
       console.error('JSON 파싱 오류:', parseError);
       throw new Error(`응답 파싱 실패: ${endpoint}`);
     }
-  } catch (networkError: any) {
+  } catch (networkError) {
     console.error('[API] 네트워크 호출 오류:', networkError);
     console.error('[API] 요청 URL:', url);
     console.error('[API] 요청 옵션:', config);
@@ -232,29 +213,18 @@ async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<
       throw new Error(errorMsg);
     }
     
-    throw networkError;
+    if (networkError instanceof Error) {
+      throw networkError;
+    }
+    
+    throw new Error('알 수 없는 네트워크 오류가 발생했습니다.');
   }
-}
-
-// 페이지네이션 응답 타입
-export interface PaginatedResponse<T> {
-  results: T[];
-  count: number;
-  total_pages: number;
-  current_page: number;
 }
 
 // 영업일지 관련 API
 export const salesReportApi = {
   // 영업일지 목록 조회 (페이지네이션/검색/필터 지원)
-  getReports: (paramsObj: {
-    page?: number;
-    page_size?: number;
-    search?: string;
-    period?: string;
-    ordering?: string;
-    companyId?: string | number;
-  } = {}): Promise<PaginatedResponse<SalesReport>> => {
+  getReports: (paramsObj: SalesReportParams = {}): Promise<PaginatedResponse<SalesReport>> => {
     const params = new URLSearchParams();
     if (paramsObj.page) params.append('page', paramsObj.page.toString());
     if (paramsObj.page_size) params.append('page_size', paramsObj.page_size.toString());
@@ -272,16 +242,7 @@ export const salesReportApi = {
   },
 
   // 영업일지 생성
-  createReport: (data: {
-    visitDate: string;
-    company: string;
-    company_obj?: string | null;
-    type: string;
-    location?: string;  // 신규 회사 소재지 (optional)
-    products: string;
-    content: string;
-    tags: string;
-  }): Promise<SalesReport> => {
+  createReport: (data: CreateSalesReportData): Promise<SalesReport> => {
     return apiCall<SalesReport>('/reports/', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -289,7 +250,7 @@ export const salesReportApi = {
   },
 
   // 영업일지 수정
-  updateReport: (id: number, data: Partial<SalesReport>): Promise<SalesReport> => {
+  updateReport: (id: number, data: UpdateSalesReportData): Promise<SalesReport> => {
     return apiCall<SalesReport>(`/reports/${id}/`, {
       method: 'PUT',
       body: JSON.stringify(data),
@@ -331,16 +292,16 @@ export const companyApi = {
   },
 
   // 회사명 자동완성 검색 (회사명 (시/구) 형식)
-  suggestCompanies: (query: string): Promise<Array<{id: string, name: string}>> => {
+  suggestCompanies: (query: string): Promise<CompanySuggestion[]> => {
     if (!query.trim()) {
       return Promise.resolve([]);
     }
-    return apiCall<Array<{id: string, name: string}>>(`/company/suggest/?query=${encodeURIComponent(query)}`);
+    return apiCall<CompanySuggestion[]>(`/company/suggest/?query=${encodeURIComponent(query)}`);
   },
 
   // 회사의 유니크한 상품명 조회
-  getUniqueProducts: (companyCode: string): Promise<{products: string[]}> => {
-    return apiCall<{products: string[]}>(`/companies/${companyCode}/unique-products/`);
+  getUniqueProducts: (companyCode: string): Promise<CompanyUniqueProducts> => {
+    return apiCall<CompanyUniqueProducts>(`/companies/${companyCode}/unique-products/`);
   },
 
   // 회사 상세 조회
@@ -372,25 +333,15 @@ export const companyApi = {
   },
 
   // 회사 통계 조회
-  getCompanyStats: async (): Promise<{
-    total: number;
-    newCustomers: number;
-    existingCustomers: number;
-    thisMonthNew: number;
-  }> => {
-    return apiCall<{
-      total: number;
-      newCustomers: number;
-      existingCustomers: number;
-      thisMonthNew: number;
-    }>('/stats/companies/');
+  getCompanyStats: async (): Promise<CompanyStats> => {
+    return apiCall<CompanyStats>('/stats/companies/');
   },
 
   // 회사 자동 등록 (회사명만으로)
-  autoCreateCompany: (company_name: string): Promise<Company> => {
+  autoCreateCompany: (company_name: string, location?: string): Promise<Company> => {
     return apiCall<Company>('/companies/auto-create/', {
       method: 'POST',
-      body: JSON.stringify({ company_name }),
+      body: JSON.stringify({ company_name, location: location || '' }),
     });
   },
 
@@ -526,7 +477,7 @@ export const companyApi = {
       const result = await response.json();
       console.log('성공 결과:', result);
       return result;
-    } catch (error: any) {
+    } catch (error) {
       console.error('API 호출 중 오류:', error);
       // 네트워크 오류인 경우 더 자세한 정보 제공
       if (error instanceof TypeError && error.message.includes('fetch')) {
@@ -554,22 +505,8 @@ export const companyFinancialStatusApi = {
 
 // 회사별 SalesData API
 export const companySalesDataApi = {
-  getCompanySalesData: async (companyCode: string): Promise<{
-    company_name: string;
-    company_code_sap: string;
-    sales_chart_data: Array<{
-      month: string;
-      매출금액: number;
-      매출이익: number;
-      GP: number;
-    }>;
-    products_chart_data: Array<{
-      month: string;
-      [key: string]: number | string; // 축종별 동적 키
-    }>;
-    total_records: number;
-  }> => {
-    return apiCall(`/companies/${companyCode}/sales-data/`);
+  getCompanySalesData: async (companyCode: string): Promise<CompanySalesData> => {
+    return apiCall<CompanySalesData>(`/companies/${companyCode}/sales-data/`);
   },
 };
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -54,25 +54,20 @@ export default function EditSalesReportPage() {
   const [isNewCompany, setIsNewCompany] = useState(false)
   const [productSuggestions, setProductSuggestions] = useState<string[]>([])
 
-  useEffect(() => {
-    fetchCompanies()
-    fetchReport()
-    // eslint-disable-next-line
-  }, [params.id])
-
-  const fetchCompanies = async () => {
+  const fetchCompanies = useCallback(async () => {
     try {
       setCompaniesLoading(true)
       const data = await companyApi.getCompanies()
-      setCompanies((data as any).results) // 반드시 (data as any).results로 배열만 저장
+      setCompanies(data.results)
     } catch (err) {
       // 무시
     } finally {
       setCompaniesLoading(false)
     }
-  }
+  }, []);
 
-  const fetchReport = async () => {
+  const fetchReport = useCallback(async () => {
+    if (!params.id) return;
     try {
       setLoading(true)
       setError(null)
@@ -80,7 +75,7 @@ export default function EditSalesReportPage() {
       setFormData({
         company: report.company_display || report.company_name || '', // 표시명 우선
         company_obj: report.company_code || undefined,
-        sales_stage: (report as any).sales_stage || "",
+        sales_stage: report.sales_stage || "",
         type: report.type,
         location: "", // 기존 영업일지 수정 시에는 소재지 필요 없음
         products: report.products,
@@ -93,7 +88,12 @@ export default function EditSalesReportPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [params.id]);
+
+  useEffect(() => {
+    fetchCompanies()
+    fetchReport()
+  }, [fetchCompanies, fetchReport])
 
   const handleInputChange = (field: string, value: string | number | undefined) => {
     setFormData((prev) => ({ ...prev, [field]: value }))
@@ -187,7 +187,7 @@ export default function EditSalesReportPage() {
         }
         
         try {
-          const company = await companyApi.autoCreateCompany(formData.company)
+          const company = await companyApi.autoCreateCompany(formData.company, formData.location)
           companyCode = company.company_code // company_code 문자열
         } catch (err) {
           setError('회사 자동 등록에 실패했습니다.')
@@ -281,18 +281,19 @@ export default function EditSalesReportPage() {
 
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* 1. 방문일자 */}
-            <div className="space-y-2">
-              <Label>방문일자 *</Label>
+            <div className="space-y-2 max-w-md">
+              <Label className="text-sm font-semibold text-foreground">방문일자 *</Label>
               <Input
                 type="date"
                 value={formData.visitDate}
                 onChange={e => handleInputChange("visitDate", e.target.value)}
+                className="w-full"
               />
             </div>
 
             {/* 2. 회사명 */}
-            <div className="space-y-2">
-              <Label>회사명 *</Label>
+            <div className="space-y-2 max-w-md">
+              <Label className="text-sm font-semibold text-foreground">회사명 *</Label>
               <CompanySearchInput
                 value={formData.company}
                 selectedCompanyId={formData.company_obj || undefined}
@@ -301,24 +302,11 @@ export default function EditSalesReportPage() {
               />
             </div>
 
-            {/* 2-1. 소재지 (신규 회사만) */}
-            {!formData.company_obj && formData.company && (
-              <div className="space-y-2">
-                <Label>소재지 (신규 회사) *</Label>
-                <LocationSelect
-                  value={formData.location}
-                  onChange={(value) => handleInputChange("location", value)}
-                  placeholder="지역을 선택하세요"
-                  required
-                />
-              </div>
-            )}
-
             {/* 3-0. 영업단계 */}
-            <div className="space-y-2">
-              <Label>영업단계</Label>
+            <div className="space-y-2 max-w-md">
+              <Label className="text-sm font-semibold text-foreground">영업단계</Label>
               <Select value={formData.sales_stage || undefined} onValueChange={value => handleInputChange("sales_stage", value)}>
-                <SelectTrigger>
+                <SelectTrigger className="w-full">
                   <SelectValue placeholder="영업단계를 선택하세요" />
                 </SelectTrigger>
                 <SelectContent>
@@ -332,10 +320,10 @@ export default function EditSalesReportPage() {
             </div>
 
             {/* 4. 영업형태 */}
-            <div className="space-y-2">
-              <Label>영업형태 *</Label>
+            <div className="space-y-2 max-w-md">
+              <Label className="text-sm font-semibold text-foreground">영업형태 *</Label>
               <Select value={formData.type || undefined} onValueChange={value => handleInputChange("type", value)}>
-                <SelectTrigger>
+                <SelectTrigger className="w-full">
                   <SelectValue placeholder="영업형태를 선택하세요" />
                 </SelectTrigger>
                 <SelectContent>
@@ -347,9 +335,22 @@ export default function EditSalesReportPage() {
               </Select>
             </div>
 
+            {/* 2-1. 소재지 (신규 회사만) */}
+            {!formData.company_obj && formData.company && (
+              <div className="space-y-2 max-w-md">
+                <Label className="text-sm font-semibold text-foreground">소재지 (신규 회사) *</Label>
+                <LocationSelect
+                  value={formData.location}
+                  onChange={(value) => handleInputChange("location", value)}
+                  placeholder="지역을 선택하세요"
+                  required
+                />
+              </div>
+            )}
+
             {/* 4. 사용품목 */}
             <div className="space-y-2">
-              <Label htmlFor="products">사용품목</Label>
+              <Label htmlFor="products" className="text-sm font-semibold text-foreground">사용품목</Label>
               <Textarea
                 id="products"
                 value={formData.products || ''}
@@ -362,20 +363,21 @@ export default function EditSalesReportPage() {
 
             {/* 5. 미팅 내용 */}
             <div className="space-y-2">
-              <Label htmlFor="content">미팅 내용 (이슈사항) *</Label>
+              <Label htmlFor="content" className="text-sm font-semibold text-foreground">미팅 내용 (이슈사항) *</Label>
               <Textarea
                 id="content"
                 value={formData.content}
                 onChange={e => handleInputChange("content", e.target.value)}
                 placeholder="영업 활동 내용을 상세히 기록해주세요..."
                 rows={6}
+                className="resize-none"
               />
             </div>
 
             {/* 6. 태그 (키워드) */}
             <div className="space-y-2">
               <div className="flex items-center gap-2">
-                <Label htmlFor="tags">태그 (키워드)</Label>
+                <Label htmlFor="tags" className="text-sm font-semibold text-foreground">태그 (키워드)</Label>
                 <Button type="button" variant="secondary" size="sm" onClick={handleRecommendTags} disabled={tagLoading}>
                   {tagLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                   키워드 추출

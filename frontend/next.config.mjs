@@ -18,6 +18,9 @@ const nextConfig = {
     // Windows 환경에서 파일 시스템 오류 방지
     esmExternals: 'loose',
   },
+  // Windows 환경에서 파일 시스템 오류 방지를 위한 설정
+  outputFileTracingIncludes: {},
+  outputFileTracingExcludes: {},
   // 웹팩 설정 최적화
   webpack: (config, { dev, isServer }) => {
     if (dev) {
@@ -39,6 +42,12 @@ const nextConfig = {
       // 파일 시스템 오류 방지를 위한 추가 설정
       config.infrastructureLogging = {
         level: 'error',
+      };
+      
+      // Windows 환경에서 파일 읽기/쓰기 오류 방지
+      config.optimization = {
+        ...config.optimization,
+        moduleIds: 'deterministic',
       };
     }
     return config;

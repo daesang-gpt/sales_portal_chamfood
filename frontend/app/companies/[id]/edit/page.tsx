@@ -15,6 +15,8 @@ import { useParams, useRouter } from "next/navigation"
 import { companyApi, Company, companyFinancialStatusApi, CompanyFinancialStatus } from "@/lib/api"
 import { toast } from "@/hooks/use-toast"
 import { LocationSelect } from "@/components/ui/location-select"
+import { SapCodeSelect } from "@/components/ui/sap-code-select"
+import { bizCodes, departmentCodes, employeeCodes, distributionTypeCodes, paymentTerms } from "@/lib/constants/sapCodes"
 
 export default function CompanyEditPage() {
   const params = useParams()
@@ -45,7 +47,7 @@ export default function CompanyEditPage() {
     company_code: '',
     company_name: '',
     // 기본정보
-    customer_classification: '' as '기존' | '신규' | '이탈' | '기타' | '',
+    customer_classification: '' as '잠재' | '신규' | '기존' | '이탈' | '벤더' | '',
     company_type: '' as '개인' | '법인' | '',
     tax_id: '',
     established_date: '',
@@ -91,11 +93,11 @@ export default function CompanyEditPage() {
           console.log('재무 정보 API 응답:', financialData)
           
           // 페이지네이션 형식일 수도 있으므로 확인
-          const list = Array.isArray(financialData) ? financialData : (financialData as any)?.results || []
+          const list = Array.isArray(financialData) ? financialData : (Array.isArray((financialData as Record<string, unknown>)?.results) ? (financialData as Record<string, unknown>).results as CompanyFinancialStatus[] : [])
           console.log('재무 정보 리스트:', list)
           
           if (list && list.length > 0) {
-            const mappedData = list.map((item: any) => {
+            const mappedData = list.map((item) => {
               const fiscalYear = item.fiscal_year ? item.fiscal_year.split('T')[0].substring(0, 4) : ''
               console.log('재무 정보 항목:', item, '파싱된 연도:', fiscalYear)
               return {
@@ -264,7 +266,10 @@ export default function CompanyEditPage() {
       const cleanData: any = {}
       Object.keys(formData).forEach(key => {
         const value = formData[key as keyof typeof formData]
-        if (value !== '' && value !== null) {
+        // sap_code_type이 빈 문자열일 때는 명시적으로 null로 설정하여 기존 값 제거
+        if (key === 'sap_code_type' && value === '') {
+          cleanData[key] = null
+        } else if (value !== '' && value !== null) {
           cleanData[key] = value
         }
       })
@@ -355,7 +360,7 @@ export default function CompanyEditPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="company_code">회사코드 *</Label>
+                <Label htmlFor="company_code" className="text-sm font-semibold text-foreground">회사코드 *</Label>
                 <Input
                   id="company_code"
                   value={formData.company_code}
@@ -366,7 +371,7 @@ export default function CompanyEditPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="company_name">회사명 *</Label>
+                <Label htmlFor="company_name" className="text-sm font-semibold text-foreground">회사명 *</Label>
                 <Input
                   id="company_name"
                   value={formData.company_name}
@@ -378,21 +383,22 @@ export default function CompanyEditPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="customer_classification">고객분류</Label>
+                  <Label htmlFor="customer_classification" className="text-sm font-semibold text-foreground">고객분류</Label>
                   <Select value={formData.customer_classification || undefined} onValueChange={(value) => handleInputChange('customer_classification', value)}>
                     <SelectTrigger>
                       <SelectValue placeholder="고객분류 선택" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="기존">기존</SelectItem>
+                      <SelectItem value="잠재">잠재</SelectItem>
                       <SelectItem value="신규">신규</SelectItem>
+                      <SelectItem value="기존">기존</SelectItem>
                       <SelectItem value="이탈">이탈</SelectItem>
-                      <SelectItem value="기타">기타</SelectItem>
+                      <SelectItem value="벤더">벤더</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="company_type">회사유형</Label>
+                  <Label htmlFor="company_type" className="text-sm font-semibold text-foreground">회사유형</Label>
                   <Select value={formData.company_type || undefined} onValueChange={(value) => handleInputChange('company_type', value)}>
                     <SelectTrigger>
                       <SelectValue placeholder="회사유형 선택" />
@@ -406,7 +412,7 @@ export default function CompanyEditPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="tax_id">사업자등록번호</Label>
+                <Label htmlFor="tax_id" className="text-sm font-semibold text-foreground">사업자등록번호</Label>
                 <Input
                   id="tax_id"
                   value={formData.tax_id}
@@ -416,7 +422,7 @@ export default function CompanyEditPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="established_date">설립일</Label>
+                <Label htmlFor="established_date" className="text-sm font-semibold text-foreground">설립일</Label>
                 <Input
                   id="established_date"
                   type="date"
@@ -426,7 +432,7 @@ export default function CompanyEditPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="ceo_name">대표자명</Label>
+                <Label htmlFor="ceo_name" className="text-sm font-semibold text-foreground">대표자명</Label>
                 <Input
                   id="ceo_name"
                   value={formData.ceo_name}
@@ -436,7 +442,7 @@ export default function CompanyEditPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="head_address">본사 주소</Label>
+                <Label htmlFor="head_address" className="text-sm font-semibold text-foreground">본사 주소</Label>
                 <div className="flex items-start space-x-2">
                   <MapPin className="h-4 w-4 mt-3 text-muted-foreground" />
                   <Textarea
@@ -450,7 +456,7 @@ export default function CompanyEditPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="city_district">시/구</Label>
+                <Label htmlFor="city_district" className="text-sm font-semibold text-foreground">시/구</Label>
                 <LocationSelect
                   value={formData.city_district}
                   onChange={(value) => handleInputChange('city_district', value)}
@@ -459,7 +465,7 @@ export default function CompanyEditPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="processing_address">공장 주소</Label>
+                <Label htmlFor="processing_address" className="text-sm font-semibold text-foreground">공장 주소</Label>
                 <Textarea
                   id="processing_address"
                   value={formData.processing_address}
@@ -470,7 +476,7 @@ export default function CompanyEditPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="main_phone">대표번호</Label>
+                <Label htmlFor="main_phone" className="text-sm font-semibold text-foreground">대표번호</Label>
                 <div className="flex items-center space-x-2">
                   <Phone className="h-4 w-4 text-muted-foreground" />
                   <Input
@@ -483,7 +489,7 @@ export default function CompanyEditPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="industry_name">업종명</Label>
+                <Label htmlFor="industry_name" className="text-sm font-semibold text-foreground">업종명</Label>
                 <Input
                   id="industry_name"
                   value={formData.industry_name}
@@ -493,7 +499,7 @@ export default function CompanyEditPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="products">주요제품</Label>
+                <Label htmlFor="products" className="text-sm font-semibold text-foreground">주요제품</Label>
                 <Textarea
                   id="products"
                   value={formData.products}
@@ -504,7 +510,7 @@ export default function CompanyEditPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="website">웹사이트</Label>
+                <Label htmlFor="website" className="text-sm font-semibold text-foreground">웹사이트</Label>
                 <Input
                   id="website"
                   type="url"
@@ -527,7 +533,7 @@ export default function CompanyEditPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label>SAP코드여부</Label>
+                <Label className="text-sm font-semibold text-foreground">SAP코드여부</Label>
                 <div className="flex items-center space-x-4">
                   <div className="flex items-center space-x-2">
                     <Checkbox
@@ -557,7 +563,7 @@ export default function CompanyEditPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="company_code_sap">SAP거래처코드</Label>
+                <Label htmlFor="company_code_sap" className="text-sm font-semibold text-foreground">SAP거래처코드</Label>
                 <Input
                   id="company_code_sap"
                   value={formData.company_code_sap}
@@ -566,92 +572,52 @@ export default function CompanyEditPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="biz_code">사업</Label>
-                  <Input
-                    id="biz_code"
-                    value={formData.biz_code}
-                    onChange={(e) => handleInputChange('biz_code', e.target.value)}
-                    placeholder="사업 코드"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="biz_name">사업부</Label>
-                  <Input
-                    id="biz_name"
-                    value={formData.biz_name}
-                    onChange={(e) => handleInputChange('biz_name', e.target.value)}
-                    placeholder="사업부"
-                  />
-                </div>
-              </div>
+              <SapCodeSelect
+                options={bizCodes}
+                codeValue={formData.biz_code}
+                nameValue={formData.biz_name}
+                onCodeChange={(code) => handleInputChange('biz_code', code)}
+                onNameChange={(name) => handleInputChange('biz_name', name)}
+                codeLabel="사업"
+                nameLabel="사업부"
+                namePlaceholder="사업부를 선택하세요"
+              />
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="department_code">지점/팀</Label>
-                  <Input
-                    id="department_code"
-                    value={formData.department_code}
-                    onChange={(e) => handleInputChange('department_code', e.target.value)}
-                    placeholder="지점/팀 코드"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="department">팀명</Label>
-                  <Input
-                    id="department"
-                    value={formData.department}
-                    onChange={(e) => handleInputChange('department', e.target.value)}
-                    placeholder="팀명"
-                  />
-                </div>
-              </div>
+              <SapCodeSelect
+                options={departmentCodes}
+                codeValue={formData.department_code}
+                nameValue={formData.department}
+                onCodeChange={(code) => handleInputChange('department_code', code)}
+                onNameChange={(name) => handleInputChange('department', name)}
+                codeLabel="지점/팀"
+                nameLabel="팀명"
+                namePlaceholder="팀명을 선택하세요"
+              />
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="employee_number">사원번호</Label>
-                  <Input
-                    id="employee_number"
-                    value={formData.employee_number}
-                    onChange={(e) => handleInputChange('employee_number', e.target.value)}
-                    placeholder="사원번호"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="employee_name">영업 사원</Label>
-                  <Input
-                    id="employee_name"
-                    value={formData.employee_name}
-                    onChange={(e) => handleInputChange('employee_name', e.target.value)}
-                    placeholder="영업 사원명"
-                  />
-                </div>
-              </div>
+              <SapCodeSelect
+                options={employeeCodes}
+                codeValue={formData.employee_number}
+                nameValue={formData.employee_name}
+                onCodeChange={(code) => handleInputChange('employee_number', code)}
+                onNameChange={(name) => handleInputChange('employee_name', name)}
+                codeLabel="사원번호"
+                nameLabel="영업 사원"
+                namePlaceholder="영업 사원을 선택하세요"
+              />
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="distribution_type_sap_code">유통형태코드</Label>
-                  <Input
-                    id="distribution_type_sap_code"
-                    value={formData.distribution_type_sap_code}
-                    onChange={(e) => handleInputChange('distribution_type_sap_code', e.target.value)}
-                    placeholder="유통형태코드"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="distribution_type_sap">유통형태</Label>
-                  <Input
-                    id="distribution_type_sap"
-                    value={formData.distribution_type_sap}
-                    onChange={(e) => handleInputChange('distribution_type_sap', e.target.value)}
-                    placeholder="유통형태"
-                  />
-                </div>
-              </div>
+              <SapCodeSelect
+                options={distributionTypeCodes}
+                codeValue={formData.distribution_type_sap_code}
+                nameValue={formData.distribution_type_sap}
+                onCodeChange={(code) => handleInputChange('distribution_type_sap_code', code)}
+                onNameChange={(name) => handleInputChange('distribution_type_sap', name)}
+                codeLabel="유통형태코드"
+                nameLabel="유통형태"
+                namePlaceholder="유통형태를 선택하세요"
+              />
 
               <div className="space-y-2">
-                <Label htmlFor="contact_person">거래처 담당자</Label>
+                <Label htmlFor="contact_person" className="text-sm font-semibold text-foreground">거래처 담당자</Label>
                 <Input
                   id="contact_person"
                   value={formData.contact_person}
@@ -661,7 +627,7 @@ export default function CompanyEditPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="contact_phone">담당자 연락처</Label>
+                <Label htmlFor="contact_phone" className="text-sm font-semibold text-foreground">담당자 연락처</Label>
                 <div className="flex items-center space-x-2">
                   <Phone className="h-4 w-4 text-muted-foreground" />
                   <Input
@@ -675,7 +641,7 @@ export default function CompanyEditPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="code_create_date">코드생성일</Label>
+                  <Label htmlFor="code_create_date" className="text-sm font-semibold text-foreground">코드생성일</Label>
                   <div className="flex items-center space-x-2">
                     <Calendar className="h-4 w-4 text-muted-foreground" />
                     <Input
@@ -687,7 +653,7 @@ export default function CompanyEditPage() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="transaction_start_date">거래시작일</Label>
+                  <Label htmlFor="transaction_start_date" className="text-sm font-semibold text-foreground">거래시작일</Label>
                   <div className="flex items-center space-x-2">
                     <Calendar className="h-4 w-4 text-muted-foreground" />
                     <Input
@@ -701,13 +667,22 @@ export default function CompanyEditPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="payment_terms">결제조건</Label>
-                <Input
-                  id="payment_terms"
-                  value={formData.payment_terms}
-                  onChange={(e) => handleInputChange('payment_terms', e.target.value)}
-                  placeholder="결제조건"
-                />
+                <Label htmlFor="payment_terms" className="text-sm font-semibold text-foreground">결제조건</Label>
+                <Select 
+                  value={formData.payment_terms || undefined} 
+                  onValueChange={(value) => handleInputChange('payment_terms', value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="결제조건을 선택하세요" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {paymentTerms.map((term) => (
+                      <SelectItem key={term} value={term}>
+                        {term}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </CardContent>
           </Card>
