@@ -25,6 +25,7 @@ export ALLOWED_HOSTS=192.168.99.37,dslspdev
 export DB_NAME=192.168.99.37:1521/XEPDB1
 export DB_USER=salesportal
 export DB_PASSWORD=salesportal123
+export SERVE_STATIC=true  # 정적 파일 서빙 활성화
 
 # Python 가상환경 활성화
 if [ ! -d "venv" ]; then
