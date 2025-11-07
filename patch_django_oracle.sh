@@ -223,67 +223,17 @@ except ImportError:
     
     # convert_datefield_value 함수에서 Database.Timestamp 체크 수정
     # oracledb에서는 Database.Timestamp가 타입이 아니라 클래스이므로 isinstance() 사용 시 에러 발생
-    # hasattr를 사용하거나 다른 방법으로 확인해야 함
+    # 가장 안전한 방법: 해당 체크를 주석 처리하거나 try-except로 감싸기
     
     modified_ops = False
     
-    # 패턴 1: isinstance(value, Database.Timestamp) - 가장 일반적인 패턴
-    import re
-    
-    # oracledb에서는 Database.Timestamp가 타입이 아니므로 isinstance() 사용 시 TypeError 발생
-    # 가장 안전한 방법: 해당 체크를 try-except로 감싸거나 완전히 제거
-    
-    # 패턴 1: if isinstance(value, Database.Timestamp): - 가장 일반적인 패턴
-    # oracledb에서는 Database.Timestamp가 타입이 아니므로 isinstance() 사용 시 TypeError 발생
-    # 가장 안전한 방법: 해당 체크를 주석 처리하거나 try-except로 감싸기
-    
-    # 먼저 단순 문자열 교체 시도 (가장 확실한 방법)
+    # 패턴: if isinstance(value, Database.Timestamp): 체크를 주석 처리
+    # 가장 간단하고 안전한 방법: 해당 라인만 주석 처리
     if 'isinstance(value, Database.Timestamp)' in content:
-        # 라인 단위로 처리하여 더 정확하게 수정
-        lines = content.split('\n')
-        new_lines = []
-        i = 0
-        while i < len(lines):
-            line = lines[i]
-            if 'isinstance(value, Database.Timestamp)' in line:
-                # 해당 라인을 try-except로 감싸기
-                indent = len(line) - len(line.lstrip())
-                # 원래 라인을 주석 처리하고 새로운 체크 추가
-                new_lines.append(' ' * indent + '# oracledb 호환성: Database.Timestamp 체크 수정')
-                new_lines.append(' ' * indent + 'try:')
-                new_lines.append(' ' * indent + '    if hasattr(Database, "Timestamp") and isinstance(value, Database.Timestamp):')
-                # 다음 몇 줄을 확인하여 return 문이나 다른 로직이 있는지 확인
-                i += 1
-                if i < len(lines):
-                    next_line = lines[i]
-                    next_indent = len(next_line) - len(next_line.lstrip())
-                    # 다음 줄이 더 들여쓰기되어 있으면 (if 블록 내부)
-                    if next_indent > indent + 4:
-                        # 내부 코드 복사
-                        while i < len(lines) and (lines[i].strip() == '' or len(lines[i]) - len(lines[i].lstrip()) > indent + 4):
-                            new_lines.append(lines[i])
-                            i += 1
-                    else:
-                        # return value 같은 한 줄짜리 처리
-                        if 'return' in next_line.lower():
-                            new_lines.append(' ' * (indent + 8) + next_line.strip())
-                            i += 1
-                new_lines.append(' ' * indent + 'except (TypeError, AttributeError):')
-                new_lines.append(' ' * indent + '    # oracledb에서는 Timestamp 타입 체크 건너뛰기')
-                new_lines.append(' ' * indent + '    pass')
-                modified_ops = True
-            else:
-                new_lines.append(line)
-                i += 1
+        import re
+        # 정규식으로 if isinstance(value, Database.Timestamp): 라인 찾기
+        # 해당 라인과 그 다음 한 줄(보통 return value)을 주석 처리
         
-        if modified_ops:
-            content = '\n'.join(new_lines)
-            print("  ✅ Database.Timestamp isinstance 체크 수정 (라인 단위)")
-    
-    # 패턴 2: 더 간단한 방법 - 해당 체크를 완전히 건너뛰기
-    # oracledb에서는 Timestamp가 필요하지 않을 수 있으므로 해당 체크를 주석 처리
-    if not modified_ops and 'Database.Timestamp' in content:
-        # convert_datefield_value 함수 찾기
         lines = content.split('\n')
         new_lines = []
         i = 0
@@ -291,19 +241,38 @@ except ImportError:
             line = lines[i]
             # isinstance(value, Database.Timestamp) 패턴 찾기
             if 'isinstance(value, Database.Timestamp)' in line:
-                # 더 안전한 체크로 교체
                 indent = len(line) - len(line.lstrip())
-                new_lines.append(' ' * indent + 'try:')
-                new_lines.append(' ' * (indent + 4) + 'if hasattr(Database, "Timestamp") and isinstance(value, Database.Timestamp):')
-                # 다음 줄들 복사
+                # 주석 추가
+                new_lines.append(' ' * indent + '# oracledb 호환성: Database.Timestamp 체크 주석 처리')
+                # 원래 라인 주석 처리
+                new_lines.append(' ' * indent + '# ' + line.lstrip())
+                
+                # 다음 줄 확인 (보통 return value 같은 코드)
                 i += 1
-                while i < len(lines) and (lines[i].strip() == '' or lines[i][indent:indent+4] == '    '):
-                    new_lines.append(lines[i])
-                    i += 1
-                # except 추가
-                new_lines.append(' ' * indent + 'except (TypeError, AttributeError):')
-                new_lines.append(' ' * (indent + 4) + '# oracledb 호환성: Timestamp 타입 체크 건너뛰기')
-                new_lines.append(' ' * (indent + 4) + 'pass')
+                if i < len(lines):
+                    next_line = lines[i]
+                    next_indent = len(next_line) - len(next_line.lstrip())
+                    # if 블록 내부 코드 (들여쓰기가 더 많음)
+                    if next_indent > indent:
+                        # if 블록 내부의 모든 코드를 주석 처리
+                        while i < len(lines):
+                            current_line = lines[i]
+                            current_indent = len(current_line) - len(current_line.lstrip())
+                            
+                            # 같은 들여쓰기 레벨이면 if 블록 종료
+                            if current_line.strip() and current_indent <= indent:
+                                break
+                            
+                            # 내부 코드 주석 처리
+                            if current_line.strip():
+                                new_lines.append(' ' * indent + '# ' + current_line.lstrip())
+                            else:
+                                new_lines.append(current_line)
+                            i += 1
+                    else:
+                        # 다음 줄이 같은 레벨이면 if 블록이 없었거나 이미 끝남
+                        pass
+                
                 modified_ops = True
             else:
                 new_lines.append(line)
@@ -311,7 +280,7 @@ except ImportError:
         
         if modified_ops:
             content = '\n'.join(new_lines)
-            print("  ✅ Database.Timestamp 체크 수정 (try-except 방식)")
+            print("  ✅ Database.Timestamp isinstance 체크 주석 처리 완료")
     
     if modified_ops:
         with open(ops_file, 'w', encoding='utf-8') as f:
@@ -319,7 +288,7 @@ except ImportError:
         print("✅ operations.py 패치 완료")
     else:
         # 이미 수정되었거나 다른 형식인 경우
-        if 'hasattr(Database, "Timestamp")' in content:
+        if '# isinstance(value, Database.Timestamp)' in content or 'hasattr(Database, "Timestamp")' in content:
             print("  ℹ️  Database.Timestamp 체크 이미 수정됨")
         else:
             print("  ⚠️  Database.Timestamp 패턴을 찾을 수 없습니다")
