@@ -31,11 +31,11 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = 'DENY'
 
 # Static files 설정 (운영용)
-STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+STATIC_ROOT = str(BASE_DIR / 'staticfiles')
 
 # 로깅 설정 (운영용)
 # 로그 디렉토리 생성 (없으면 자동 생성)
-LOG_DIR = os.path.join(BASE_DIR, 'logs')
+LOG_DIR = str(BASE_DIR / 'logs')
 os.makedirs(LOG_DIR, exist_ok=True)
 
 LOGGING = {
