@@ -25,6 +25,12 @@ python manage.py migrate
 # 3. 프론트엔드 의존성 설치 및 빌드
 echo "📦 프론트엔드 의존성을 설치합니다..."
 cd ../frontend
+
+# Next.js 빌드 캐시 삭제 (캐시 문제 방지)
+echo "🧹 Next.js 빌드 캐시 삭제 중..."
+rm -rf .next
+rm -rf node_modules/.cache
+
 npm install
 
 echo "🏗️ 프론트엔드를 빌드합니다..."

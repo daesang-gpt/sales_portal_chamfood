@@ -65,8 +65,32 @@ pip install -r requirements.txt
 # 5. Frontend 설정
 echo "Frontend 환경 설정 중..."
 cd $DEPLOY_DIR/frontend
+
+# Next.js 빌드 캐시 삭제 (캐시 문제 방지)
+echo "🧹 Next.js 빌드 캐시 삭제 중..."
+rm -rf .next
+rm -rf node_modules/.cache
+
+# 의존성 설치
 npm install
+
+# 프로덕션 빌드
+echo "🏗️ 프론트엔드 빌드 중..."
 npm run build
+
+# 프론트엔드 서비스 재시작 (systemd 사용 시)
+if systemctl is-active --quiet sales-portal-frontend 2>/dev/null; then
+    echo "🔄 프론트엔드 서비스 재시작 중..."
+    sudo systemctl restart sales-portal-frontend
+elif pgrep -f "next start" > /dev/null; then
+    echo "🔄 프론트엔드 프로세스 재시작 중..."
+    # 기존 프로세스 종료
+    pkill -f "next start" || true
+    sleep 2
+    # 새로 시작 (백그라운드)
+    cd $DEPLOY_DIR
+    ./start_frontend_daemon.sh
+fi
 
 # 6. Database 마이그레이션
 echo "Database 마이그레이션 실행 중..."

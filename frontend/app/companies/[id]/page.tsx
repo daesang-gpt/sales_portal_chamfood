@@ -66,9 +66,18 @@ export default function CompanyDetailPage() {
       if (!company?.company_code) return;
       try {
         const data = await companyFinancialStatusApi.getByCompanyCode(company.company_code);
-        const list = Array.isArray(data) ? data : data;
-        setFinancialStatus(list.sort((a, b) => b.fiscal_year.localeCompare(a.fiscal_year)));
-        console.log("setFinancialStatus", data); // 추가
+        console.log("재무 정보 API 응답:", data); // 추가
+        
+        // 페이지네이션 형식일 수도 있으므로 확인
+        const list = Array.isArray(data) ? data : (Array.isArray((data as Record<string, unknown>)?.results) ? (data as Record<string, unknown>).results as CompanyFinancialStatus[] : [])
+        console.log("재무 정보 리스트:", list); // 추가
+        
+        if (list && list.length > 0) {
+          setFinancialStatus(list.sort((a, b) => b.fiscal_year.localeCompare(a.fiscal_year)));
+        } else {
+          setFinancialStatus([]);
+        }
+        console.log("setFinancialStatus", list); // 추가
 
       } catch (e) {
         setFinancialStatus([]);
