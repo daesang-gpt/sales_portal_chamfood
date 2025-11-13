@@ -72,8 +72,15 @@ export default function EditSalesReportPage() {
       setLoading(true)
       setError(null)
       const report = await salesReportApi.getReport(Number(params.id))
+      
+      // 기존 회사 표시 형식 생성: "회사명 (시/구)" 형식
+      let companyDisplay = report.company_name || ''
+      if (report.company_city_district) {
+        companyDisplay = `${report.company_name} (${report.company_city_district})`
+      }
+      
       setFormData({
-        company: report.company_display || report.company_name || '', // 표시명 우선
+        company: companyDisplay, // 표시용: "회사명 (시/구)" 형식
         company_obj: report.company_code || undefined,
         sales_stage: report.sales_stage || "",
         type: report.type,
@@ -83,6 +90,11 @@ export default function EditSalesReportPage() {
         tags: report.tags,
         visitDate: report.visitDate,
       })
+      
+      // 기존 회사가 있으면 신규 회사가 아님
+      if (report.company_code) {
+        setIsNewCompany(false)
+      }
     } catch (err) {
       setError("영업일지 정보를 불러오지 못했습니다.")
     } finally {
@@ -201,6 +213,15 @@ export default function EditSalesReportPage() {
         visitDate: formData.visitDate, // 날짜 형식 확인
         location: isNewCompany ? formData.location : undefined, // 신규 회사인 경우에만 소재지 포함
       }
+      
+      // 디버깅 로그
+      console.log('영업일지 수정 제출 데이터:', {
+        company: submitData.company,
+        company_obj: submitData.company_obj,
+        companyCode: companyCode,
+        formData_company_obj: formData.company_obj
+      })
+      
       await salesReportApi.updateReport(Number(params.id), submitData)
       router.push(`/sales-reports/${params.id}?page=${page}`)
     } catch (err) {

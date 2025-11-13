@@ -10,6 +10,7 @@ export interface SalesReport {
   company_code?: string | null;  // 회사 코드(Primary Key)
   company_obj?: string | null;  // 회사 객체 ID (company_code)
   company_display?: string;  // 표시용 회사명 (옵션)
+  company_city_district?: string | null;  // 회사 시/구
   sales_stage?: string;  // 영업단계
   company_code_resolved?: string | null;  // 해결된 company_code (API 응답용)
   type: string;

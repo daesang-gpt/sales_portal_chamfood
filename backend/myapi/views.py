@@ -531,8 +531,22 @@ class ReportViewSet(viewsets.ModelViewSet):
         # 요청 데이터를 dict로 복사
         data = dict(request.data)
         
-        # 회사 관련 데이터 추출 및 검증
+        # 회사 관련 데이터 추출
+        company_location = data.get('location', '')  # 신규 회사 소재지
+        company_products = data.get('products', '')
+        company_name_input = data.get('company', '')  # 프론트엔드에서 'company' 필드로 회사명 전송
+        
+        company_obj = None
+        
+        # 회사 참조가 있는 경우 (Company PK는 company_code 문자열)
+        # company_obj는 프론트엔드 호환성을 위해 받지만, 내부적으로는 company_code로 변환
         company_code_value = data.get('company_obj') or data.get('company_code')
+        
+        # 디버깅 로그
+        logger.debug(f"영업일지 수정 - company_code_value: {company_code_value}, company_name_input: {company_name_input}")
+        logger.debug(f"영업일지 수정 - 기존 instance.company_code: {instance.company_code}")
+        
+        # company_code_value가 있으면 우선적으로 처리 (기존 회사 선택)
         if company_code_value:
             try:
                 company_code = company_code_value
@@ -543,10 +557,12 @@ class ReportViewSet(viewsets.ModelViewSet):
                 # 회사 정보를 data에 추가
                 data['company_name'] = company_obj.company_name
                 data['company_city_district'] = company_obj.city_district
-                # Company 객체를 company_code 필드에 설정 (FK 업데이트를 위해)
-                data['company_code'] = company_obj  # 문자열이 아닌 Company 객체 설정
+                # company_code_fk 필드(PrimaryKeyRelatedField)에 company_code 설정
+                data['company_code_fk'] = company_obj.company_code
                 # company_obj 필드는 제거 (company_code로 대체)
                 data.pop('company_obj', None)
+                # company_code 필드가 존재한다면 제거 (SerializerMethodField와 충돌 방지)
+                data.pop('company_code', None)
                 
                 logger.debug(f"Company 객체 설정: {company_obj.company_code} - {company_obj.company_name}")
                 
@@ -566,16 +582,65 @@ class ReportViewSet(viewsets.ModelViewSet):
                     'error': f'회사 정보 조회 중 오류가 발생했습니다: {str(e)}',
                     'company_code': company_code_value
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        elif instance.company_code:
-            # instance의 company_code FK를 통해 Company 객체 가져오기
-            company_obj = instance.company_code
-            # 기존 회사 정보가 있으면 data에 추가
-            if not data.get('company_code'):
+        elif company_name_input:
+            # company_code_value가 없고 company_name_input이 있으면 회사명으로 검색 또는 신규 생성
+            # 기존 회사명으로 검색
+            existing_company = Company.objects.filter(company_name=company_name_input).first()
+            if existing_company:
+                company_obj = existing_company
+                # 회사 정보를 data에 추가
                 data['company_name'] = company_obj.company_name
                 data['company_city_district'] = company_obj.city_district
-                data['company_code'] = company_obj.company_code
+                data['company_code_fk'] = company_obj.company_code
+                # 회사 데이터에서 사용품목을 가져와서 데이터에 설정
+                data['products'] = existing_company.products or company_products
+            else:
+                # 신규 회사 생성
+                last_code = Company.objects.filter(company_code__startswith='C').aggregate(
+                    max_code=Max('company_code')
+                )['max_code']
+                if last_code and last_code[1:].isdigit():
+                    next_num = int(last_code[1:]) + 1
+                else:
+                    next_num = 1
+                new_code = f'C{next_num:07d}'
+                
+                # location 정보를 city_district로 설정
+                # 작성자 정보(사원번호, 이름)도 함께 저장
+                new_company = Company.objects.create(
+                    company_code=new_code,
+                    company_name=company_name_input,
+                    customer_classification='잠재',
+                    products=company_products,
+                    city_district=company_location,  # location을 city_district로 저장
+                    employee_number=request.user.employee_number if request.user else None,
+                    employee_name=request.user.name if request.user else None
+                )
+                company_obj = new_company
+                data['company_name'] = company_obj.company_name
+                data['company_city_district'] = company_obj.city_district
+                data['company_code_fk'] = company_obj.company_code
+                data['products'] = company_products
             # company_obj 필드는 제거 (company_code로 대체)
             data.pop('company_obj', None)
+            data.pop('company_code', None)
+        # company_code_value도 없고 company_name_input도 없으면 기존 회사 유지
+        # (회사 정보를 변경하지 않는 경우)
+        elif not company_code_value and not company_name_input and instance.company_code:
+            # instance의 company_code FK를 통해 Company 객체 가져오기
+            company_obj = instance.company_code
+            # 기존 회사 정보가 있으면 data에 추가 (회사 정보를 변경하지 않는 경우)
+            if not data.get('company_code_fk'):
+                data['company_name'] = company_obj.company_name
+                data['company_city_district'] = company_obj.city_district
+                data['company_code_fk'] = company_obj.company_code
+            # company_obj 필드는 제거 (company_code로 대체)
+            data.pop('company_obj', None)
+            data.pop('company_code', None)
+        
+        # location 필드는 Report 모델에 없으므로 제거
+        data.pop('location', None)
+        data.pop('company', None)  # company(회사명)는 company_name으로 저장됨
         
         # 표준 DRF 방식으로 serializer 생성 및 검증
         serializer = self.get_serializer(instance, data=data, partial=partial)
