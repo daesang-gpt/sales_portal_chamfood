@@ -65,7 +65,8 @@ export interface CompanyStats {
 // 회사 제안 타입 (자동완성)
 export interface CompanySuggestion {
   id: string;
-  name: string;
+  name: string;  // 표시용: "회사명 (시/구)" 형식
+  company_name?: string;  // 실제 회사명
 }
 
 // 회사 유니크 상품명 응답 타입

@@ -9,7 +9,8 @@ import { cn } from "@/lib/utils"
 
 interface CompanySuggestion {
   id: string  // company_code (문자열)
-  name: string
+  name: string  // 표시용: "회사명 (시/구)" 형식
+  company_name?: string  // 실제 회사명
 }
 
 interface CompanySearchInputProps {
@@ -92,11 +93,13 @@ export function CompanySearchInput({
 
   // 회사 선택 처리
   const handleSelectCompany = (company: CompanySuggestion) => {
-    setInputValue(company.name)
+    // 표시용 텍스트는 "회사명 (시/구)" 형식이지만, 실제 저장은 회사명만 사용
+    const actualCompanyName = company.company_name || company.name.split(' (')[0]  // "회사명 (시/구)"에서 회사명만 추출
+    setInputValue(company.name)  // 표시는 "회사명 (시/구)" 형식 유지
     setSuggestions([])
     setIsOpen(false)
     setSelectedIndex(-1)
-    onChange(company.name, company.id)
+    onChange(actualCompanyName, company.id)  // 실제 회사명만 저장
   }
 
   // 선택 해제 처리

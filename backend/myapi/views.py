@@ -429,8 +429,21 @@ class ReportViewSet(viewsets.ModelViewSet):
             # company_obj는 프론트엔드 호환성을 위해 받지만, 내부적으로는 company_code로 변환
             company_code_value = data.get('company_obj') or data.get('company_code')
             
-            # company_name_input이 있으면 우선적으로 처리 (새로운 회사명 입력)
-            if company_name_input:
+            # company_code_value가 있으면 우선적으로 처리 (기존 회사 선택)
+            if company_code_value:
+                # 기존 회사 코드로 검색
+                try:
+                    company_code = company_code_value
+                    # 문자열로 변환 (Oracle 호환성)
+                    if not isinstance(company_code, str):
+                        company_code = str(company_code)
+                    company_obj = Company.objects.get(company_code=company_code)
+                    # 회사 데이터에서 사용품목을 가져와서 데이터에 설정
+                    data['products'] = company_obj.products or company_products
+                except Company.DoesNotExist:
+                    return Response({'error': '선택하신 회사를 찾을 수 없습니다.'}, status=status.HTTP_400_BAD_REQUEST)
+            elif company_name_input:
+                # company_code_value가 없고 company_name_input이 있으면 회사명으로 검색 또는 신규 생성
                 # 기존 회사명으로 검색
                 existing_company = Company.objects.filter(company_name=company_name_input).first()
                 if existing_company:
@@ -461,18 +474,6 @@ class ReportViewSet(viewsets.ModelViewSet):
                     )
                     company_obj = new_company
                     data['products'] = company_products
-            elif company_code_value:
-                # 기존 회사 코드로 검색
-                try:
-                    company_code = company_code_value
-                    # 문자열로 변환 (Oracle 호환성)
-                    if not isinstance(company_code, str):
-                        company_code = str(company_code)
-                    company_obj = Company.objects.get(company_code=company_code)
-                    # 회사 데이터에서 사용품목을 가져와서 데이터에 설정
-                    data['products'] = company_obj.products or company_products
-                except Company.DoesNotExist:
-                    return Response({'error': '선택하신 회사를 찾을 수 없습니다.'}, status=status.HTTP_400_BAD_REQUEST)
             
             # 회사 정보를 데이터에 추가 (저장용)
             if company_obj:
@@ -1216,7 +1217,7 @@ def company_suggest_view(request):
             company_name__icontains=query
         )[:10]  # 최대 10개
         
-        # 응답 형식: [{"id": "C0000001", "name": "회사명 (시/구)"}, ...]
+        # 응답 형식: [{"id": "C0000001", "name": "회사명 (시/구)", "company_name": "회사명"}, ...]
         suggestions = []
         for company in companies:
             display_info = []
@@ -1232,7 +1233,8 @@ def company_suggest_view(request):
             
             suggestions.append({
                 "id": company.company_code,
-                "name": display_name
+                "name": display_name,
+                "company_name": company.company_name  # 실제 회사명 추가
             })
         
         return Response(suggestions, status=status.HTTP_200_OK)
