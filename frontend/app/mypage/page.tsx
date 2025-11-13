@@ -132,7 +132,7 @@ export default function MyPage() {
                   <Label htmlFor="role">권한</Label>
                   <Input
                     id="role"
-                    value={user.role === 'admin' ? '관리자' : '일반 사용자'}
+                    value={user.role === 'admin' ? '관리자' : user.role === 'viewer' ? '뷰어' : '일반 사용자'}
                     disabled
                     className="bg-gray-100"
                   />
@@ -228,12 +228,18 @@ export default function MyPage() {
               <CardDescription>자주 사용하는 메뉴로 이동합니다.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
-              <Button variant="outline" className="w-full justify-start">
-                내 보고서 작성
-              </Button>
-              <Button variant="outline" className="w-full justify-start">
-                담당 고객사 관리
-              </Button>
+              {user?.role !== 'viewer' ? (
+                <>
+                  <Button variant="outline" className="w-full justify-start">
+                    내 보고서 작성
+                  </Button>
+                  <Button variant="outline" className="w-full justify-start">
+                    담당 고객사 관리
+                  </Button>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">뷰어 권한은 작성 메뉴를 사용할 수 없습니다.</p>
+              )}
               {user?.role === 'admin' && (
                 <Button variant="outline" className="w-full justify-start" onClick={() => router.push('/admin')}>
                   관리자 페이지

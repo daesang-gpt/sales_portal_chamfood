@@ -11,7 +11,7 @@ import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { companyApi, Company, salesReportApi, SalesReport, companyFinancialStatusApi, CompanyFinancialStatus, companySalesDataApi } from "@/lib/api"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { isAdmin } from "@/lib/auth"
+import { isAdmin, isViewer } from "@/lib/auth"
 import { toast } from "@/hooks/use-toast"
 
 export default function CompanyDetailPage() {
@@ -26,6 +26,7 @@ export default function CompanyDetailPage() {
   const [error, setError] = useState<string | null>(null)
   // const [users, setUsers] = useState<User[]>([]);
   const [isAdminUser, setIsAdminUser] = useState(false);
+  const [isViewerUser, setIsViewerUser] = useState(false);
   const [financialStatus, setFinancialStatus] = useState<CompanyFinancialStatus[]>([]);
   const [salesData, setSalesData] = useState<any>(null);
   const [salesDataLoading, setSalesDataLoading] = useState(false);
@@ -54,6 +55,7 @@ export default function CompanyDetailPage() {
       // 클라이언트 사이드에서만 isAdmin 체크
       if (typeof window !== 'undefined') {
         setIsAdminUser(isAdmin());
+        setIsViewerUser(isViewer());
       }
     }
   }, [params.id])
@@ -339,12 +341,14 @@ export default function CompanyDetailPage() {
           })()}
         </div>
         <div className="flex gap-2">
-          <Button asChild>
-            <Link href={`/companies/${company.company_code}/edit?page=${page}${search ? `&search=${encodeURIComponent(search)}` : ''}`}>
-              <Edit className="mr-2 h-4 w-4" />
-              수정
-            </Link>
-          </Button>
+          {!isViewerUser && (
+            <Button asChild>
+              <Link href={`/companies/${company.company_code}/edit?page=${page}${search ? `&search=${encodeURIComponent(search)}` : ''}`}>
+                <Edit className="mr-2 h-4 w-4" />
+                수정
+              </Link>
+            </Button>
+          )}
           {isAdminUser && company && (
             <Button variant="destructive" onClick={handleDelete}>
               삭제

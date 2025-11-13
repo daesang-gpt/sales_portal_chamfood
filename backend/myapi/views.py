@@ -36,6 +36,22 @@ TAG_CANDIDATES = None
 TAG_EMBEDDINGS = None
 TAG_MODEL = None
 
+
+def get_user_role(user):
+    return getattr(user, 'role', None) if user else None
+
+
+def is_admin_user(user):
+    return get_user_role(user) == 'admin'
+
+
+def is_viewer_user(user):
+    return get_user_role(user) == 'viewer'
+
+
+def has_global_view_access(user):
+    return get_user_role(user) in ('admin', 'viewer')
+
 # 태그 후보 및 임베딩을 DB에서 불러와 캐싱
 def load_tag_candidates_and_embeddings():
     global TAG_CANDIDATES, TAG_EMBEDDINGS, TAG_MODEL
@@ -60,6 +76,21 @@ class CompanyViewSet(viewsets.ModelViewSet):
     serializer_class = CompanySerializer
     permission_classes = [IsAuthenticated]
 
+    def create(self, request, *args, **kwargs):
+        if is_viewer_user(request.user):
+            return Response({'error': '뷰어 권한은 회사를 등록할 수 없습니다.'}, status=status.HTTP_403_FORBIDDEN)
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        if is_viewer_user(request.user):
+            return Response({'error': '뷰어 권한은 회사를 수정할 수 없습니다.'}, status=status.HTTP_403_FORBIDDEN)
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        if is_viewer_user(request.user):
+            return Response({'error': '뷰어 권한은 회사를 수정할 수 없습니다.'}, status=status.HTTP_403_FORBIDDEN)
+        return super().partial_update(request, *args, **kwargs)
+
     def get_queryset(self):
         queryset = Company.objects.all()
         # 검색 파라미터 처리
@@ -83,6 +114,9 @@ class CompanyViewSet(viewsets.ModelViewSet):
         return queryset.order_by(ordering)
 
     def destroy(self, request, *args, **kwargs):
+        if is_viewer_user(request.user):
+            return Response({'error': '뷰어 권한은 회사를 삭제할 수 없습니다.'}, status=status.HTTP_403_FORBIDDEN)
+
         instance = self.get_object()
         company_code = instance.company_code
         
@@ -399,6 +433,9 @@ class ReportViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         """영업일지 생성 시 회사 데이터 이용 로직"""
         try:
+            if is_viewer_user(request.user):
+                return Response({'error': '뷰어 권한은 영업일지를 생성할 수 없습니다.'}, status=status.HTTP_403_FORBIDDEN)
+
             data = dict(request.data)
             
             # visitDate 날짜 변환 (Oracle 호환성을 위해 명시적으로 변환)
@@ -522,6 +559,9 @@ class ReportViewSet(viewsets.ModelViewSet):
 
     def update(self, request, *args, **kwargs):
         """영업일지 수정 시 회사 데이터 이용 로직"""
+        if is_viewer_user(request.user):
+            return Response({'error': '뷰어 권한은 영업일지를 수정할 수 없습니다.'}, status=status.HTTP_403_FORBIDDEN)
+
         instance = self.get_object()
         partial = kwargs.pop('partial', False)
         
@@ -656,6 +696,11 @@ class ReportViewSet(viewsets.ModelViewSet):
             instance._prefetched_objects_cache = {}
         
         return Response(serializer.data)
+
+    def destroy(self, request, *args, **kwargs):
+        if is_viewer_user(request.user):
+            return Response({'error': '뷰어 권한은 영업일지를 삭제할 수 없습니다.'}, status=status.HTTP_403_FORBIDDEN)
+        return super().destroy(request, *args, **kwargs)
 
     def perform_update(self, serializer):
         # 업데이트 시에도 author, author_name, author_department는 변경하지 않음
@@ -980,7 +1025,7 @@ def dashboard_stats_view(request):
             prev_month_last_day = now.replace(day=1) - timedelta(days=1)
         
         # 사용자별 데이터 필터링
-        if hasattr(user, 'role') and user.role == 'admin':
+        if has_global_view_access(user):
             # 관리자는 전체 데이터
             reports_queryset = Report.objects.all()
             companies_queryset = Company.objects.all()
@@ -1036,7 +1081,7 @@ def dashboard_stats_view(request):
                 매출담당자_norm=Replace('매출담당자', Value(' '), Value('')),
                 담당자_norm=Replace('담당자', Value(' '), Value(''))
             )
-            if not (hasattr(user, 'role') and user.role == 'admin'):
+            if not has_global_view_access(user):
                 this_month_sales = this_month_sales.filter(
                     Q(매출담당자_norm__icontains=normalized_name)
                 )
@@ -1084,7 +1129,7 @@ def dashboard_charts_data_view(request):
         user = request.user
         
         # 사용자별 데이터 필터링
-        if hasattr(user, 'role') and user.role == 'admin':
+        if has_global_view_access(user):
             reports_queryset = Report.objects.all()
             companies_queryset = Company.objects.all()
         else:
@@ -1128,7 +1173,7 @@ def dashboard_charts_data_view(request):
                 매출담당자_norm=Replace('매출담당자', Value(' '), Value('')),
                 담당자_norm=Replace('담당자', Value(' '), Value(''))
             )
-            if not (hasattr(user, 'role') and user.role == 'admin'):
+            if not has_global_view_access(user):
                 monthly_sales_queryset = monthly_sales_queryset.filter(
                     Q(매출담당자_norm__icontains=normalized_name)
                 )
@@ -1168,7 +1213,7 @@ def dashboard_charts_data_view(request):
             end_date = now.replace(day=monthrange(current_year, current_month)[1]).date()
 
             channel_qs = SalesData.objects.filter(매출일자__gte=start_date, 매출일자__lte=end_date)
-            if not (hasattr(user, 'role') and user.role == 'admin'):
+            if not has_global_view_access(user):
                 # 일반 사용자는 매출담당자 기준으로 필터링
                 channel_qs = channel_qs.annotate(
                     매출담당자_norm=Replace('매출담당자', Value(' '), Value(''))
@@ -1629,7 +1674,7 @@ class SalesDataViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        if hasattr(user, 'role') and user.role == 'admin':
+        if has_global_view_access(user):
             # 관리자는 전체 데이터 접근 가능
             queryset = SalesData.objects.all()
         else:
@@ -1659,8 +1704,8 @@ def download_reports_csv(request):
     """영업일지 데이터를 CSV로 다운로드"""
     try:
         # 관리자 권한 확인
-        if not hasattr(request.user, 'role') or request.user.role != 'admin':
-            return Response({'error': '관리자만 다운로드할 수 있습니다.'}, status=status.HTTP_403_FORBIDDEN)
+        if not has_global_view_access(request.user):
+            return Response({'error': '관리자 또는 뷰어만 다운로드할 수 있습니다.'}, status=status.HTTP_403_FORBIDDEN)
         
         # 모든 영업일지 데이터 조회
         # Oracle 타입 변환 오류를 방지하기 위해 필요한 필드만 가져오기
@@ -1824,8 +1869,8 @@ def download_companies_csv(request):
     """회사 데이터를 CSV로 다운로드"""
     try:
         # 관리자 권한 확인
-        if not hasattr(request.user, 'role') or request.user.role != 'admin':
-            return Response({'error': '관리자만 다운로드할 수 있습니다.'}, status=status.HTTP_403_FORBIDDEN)
+        if not has_global_view_access(request.user):
+            return Response({'error': '관리자 또는 뷰어만 다운로드할 수 있습니다.'}, status=status.HTTP_403_FORBIDDEN)
         
         # 모든 회사 데이터 조회
         companies = Company.objects.all()

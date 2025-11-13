@@ -14,6 +14,7 @@ import { salesReportApi, companyApi, SalesReport, Company } from "@/lib/api"
 import dynamic from "next/dynamic"
 import { fetchRecommendedTags } from '@/lib/api'
 import { LocationSelect } from "@/components/ui/location-select"
+import { getUserFromToken } from "@/lib/auth"
 
 // CompanySearchInput을 클라이언트에서만 로드
 const CompanySearchInput = dynamic(
@@ -53,6 +54,24 @@ export default function EditSalesReportPage() {
   const [tagLoading, setTagLoading] = useState(false)
   const [isNewCompany, setIsNewCompany] = useState(false)
   const [productSuggestions, setProductSuggestions] = useState<string[]>([])
+  const [isViewer, setIsViewer] = useState(false)
+  const [isCheckingRole, setIsCheckingRole] = useState(true)
+
+  useEffect(() => {
+    const currentUser = getUserFromToken();
+    if (!currentUser) {
+      router.push('/login');
+      return;
+    }
+    if (currentUser.role === 'viewer') {
+      setError('뷰어 권한은 영업일지를 수정할 수 없습니다.');
+      setIsViewer(true);
+      setIsCheckingRole(false);
+      router.replace(`/sales-reports/${params.id}?page=${page}`);
+      return;
+    }
+    setIsCheckingRole(false);
+  }, [router, params.id, page])
 
   const fetchCompanies = useCallback(async () => {
     try {
@@ -103,9 +122,12 @@ export default function EditSalesReportPage() {
   }, [params.id]);
 
   useEffect(() => {
+    if (isCheckingRole || isViewer) {
+      return
+    }
     fetchCompanies()
     fetchReport()
-  }, [fetchCompanies, fetchReport])
+  }, [fetchCompanies, fetchReport, isCheckingRole, isViewer])
 
   const handleInputChange = (field: string, value: string | number | undefined) => {
     setFormData((prev) => ({ ...prev, [field]: value }))
@@ -229,6 +251,22 @@ export default function EditSalesReportPage() {
     } finally {
       setSaving(false)
     }
+  }
+
+  if (isCheckingRole) {
+    return (
+      <div className="space-y-6">
+        <div className="text-center text-muted-foreground py-12">권한을 확인하는 중입니다...</div>
+      </div>
+    )
+  }
+
+  if (isViewer) {
+    return (
+      <div className="space-y-6">
+        <div className="text-center text-red-500 py-12">뷰어 권한은 영업일지를 수정할 수 없습니다.</div>
+      </div>
+    )
   }
 
   // 추천 태그 추출 핸들러

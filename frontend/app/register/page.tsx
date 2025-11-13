@@ -158,6 +158,7 @@ export default function RegisterPage() {
                 <SelectContent>
                   <SelectItem value="user">일반 사용자</SelectItem>
                   <SelectItem value="admin">관리자</SelectItem>
+                  <SelectItem value="viewer">뷰어</SelectItem>
                 </SelectContent>
               </Select>
             </div>

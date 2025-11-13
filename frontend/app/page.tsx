@@ -30,6 +30,7 @@ export default function Dashboard() {
   const [chartData, setChartData] = useState<any>(null);
   const [dataLoading, setDataLoading] = useState(true);
   const router = useRouter();
+  const isViewer = user?.role === 'viewer';
 
   useEffect(() => {
     // 인증 확인
@@ -131,12 +132,16 @@ export default function Dashboard() {
             </div>
           )}
           <div className="flex gap-2">
-            <Button asChild>
-              <Link href="/sales-reports/new">영업일지 작성</Link>
-            </Button>
-            <Button variant="outline" asChild>
-              <Link href="/companies/new">회사 등록</Link>
-            </Button>
+            {!isViewer && (
+              <>
+                <Button asChild>
+                  <Link href="/sales-reports/new">영업일지 작성</Link>
+                </Button>
+                <Button variant="outline" asChild>
+                  <Link href="/companies/new">회사 등록</Link>
+                </Button>
+              </>
+            )}
             <Button variant="outline" asChild>
               <Link href="/mypage">마이페이지</Link>
             </Button>

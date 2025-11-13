@@ -13,6 +13,7 @@ import { PaginationInput } from "@/components/ui/pagination"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { getUserFromToken } from "@/lib/auth"
 
 export default function CompaniesPage() {
   const router = useRouter();
@@ -37,6 +38,7 @@ export default function CompaniesPage() {
   const [error, setError] = useState<string | null>(null)
   const [totalPages, setTotalPages] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
+  const [isViewer, setIsViewer] = useState(false)
 
   // 통계 데이터만 별도로 로드
   const loadStats = async () => {
@@ -84,6 +86,11 @@ export default function CompaniesPage() {
   }, []);
 
   // URL의 page, searchTerm, customerClassification이 변경될 때마다 데이터 로드 (초기 로드, 브라우저 뒤로가기 포함)
+  useEffect(() => {
+    const user = getUserFromToken();
+    setIsViewer(user?.role === 'viewer');
+  }, []);
+
   useEffect(() => {
     loadCompanies(currentPage, searchTerm, customerClassification);
   }, [currentPage, searchTerm, customerClassification, loadCompanies]);
@@ -215,12 +222,14 @@ export default function CompaniesPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">회사 관리</h1>
-        <Button asChild>
-          <Link href="/companies/new">
-            <Plus className="mr-2 h-4 w-4" />
-            회사 등록
-          </Link>
-        </Button>
+        {!isViewer && (
+          <Button asChild>
+            <Link href="/companies/new">
+              <Plus className="mr-2 h-4 w-4" />
+              회사 등록
+            </Link>
+          </Button>
+        )}
       </div>
 
       <TooltipProvider>

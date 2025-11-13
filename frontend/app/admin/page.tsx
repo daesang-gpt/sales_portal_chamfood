@@ -103,7 +103,9 @@ export default function AdminPage() {
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-500">권한</p>
-                  <p className="text-lg">{user.role === 'admin' ? '관리자' : '사용자'}</p>
+                  <p className="text-lg">
+                    {user.role === 'admin' ? '관리자' : user.role === 'viewer' ? '뷰어' : '사용자'}
+                  </p>
                 </div>
               </div>
             </CardContent>

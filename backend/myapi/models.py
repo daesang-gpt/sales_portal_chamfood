@@ -18,6 +18,7 @@ class User(AbstractUser):
     ROLE_CHOICES = [
         ('admin', '관리자'),
         ('user', '사용자'),
+        ('viewer', '뷰어'),
     ]
     username = models.CharField('아이디', max_length=50, unique=True)
     name = models.CharField(max_length=100)

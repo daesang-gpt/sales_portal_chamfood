@@ -11,6 +11,7 @@ import Link from "next/link"
 import { salesReportApi, SalesReport, PaginatedResponse } from "@/lib/api"
 import { PaginationInput } from "@/components/ui/pagination"
 import { useRouter, useSearchParams } from "next/navigation"
+import { getUserFromToken } from "@/lib/auth"
 
 const PERIOD_OPTIONS = [
   { label: "1개월", value: "1m" },
@@ -33,6 +34,7 @@ export default function SalesReportsPage() {
   const [error, setError] = useState<string | null>(null);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
+  const [isViewer, setIsViewer] = useState(false);
 
   // API 호출 함수
   const fetchReports = useCallback(async (page: number, search: string = searchTerm, periodValue: string = period) => {
@@ -80,6 +82,11 @@ export default function SalesReportsPage() {
   }, [searchParams]);
 
   // URL의 page 파라미터가 변경될 때마다 데이터 로드 (초기 로드, 브라우저 뒤로가기 포함)
+  useEffect(() => {
+    const user = getUserFromToken();
+    setIsViewer(user?.role === 'viewer');
+  }, []);
+
   useEffect(() => {
     fetchReports(currentPage, searchTerm, period);
   }, [currentPage, searchTerm, period, fetchReports]);
@@ -170,12 +177,14 @@ export default function SalesReportsPage() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <h1 className="text-3xl font-bold">영업일지 관리</h1>
-          <Button asChild>
-            <Link href="/sales-reports/new">
-              <Plus className="mr-2 h-4 w-4" />
-              영업일지 작성
-            </Link>
-          </Button>
+          {!isViewer && (
+            <Button asChild>
+              <Link href="/sales-reports/new">
+                <Plus className="mr-2 h-4 w-4" />
+                영업일지 작성
+              </Link>
+            </Button>
+          )}
         </div>
         <Card>
           <CardContent className="flex items-center justify-center min-h-[200px]">
@@ -195,12 +204,14 @@ export default function SalesReportsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">영업일지 관리</h1>
-        <Button asChild>
-          <Link href="/sales-reports/new">
-            <Plus className="mr-2 h-4 w-4" />
-            영업일지 작성
-          </Link>
-        </Button>
+        {!isViewer && (
+          <Button asChild>
+            <Link href="/sales-reports/new">
+              <Plus className="mr-2 h-4 w-4" />
+              영업일지 작성
+            </Link>
+          </Button>
+        )}
       </div>
       <Card>
         <CardHeader>
@@ -235,12 +246,14 @@ export default function SalesReportsPage() {
           {reports.length === 0 ? (
             <div className="text-center py-8">
               <p className="text-muted-foreground">등록된 영업일지가 없습니다.</p>
-              <Button asChild className="mt-4">
-                <Link href="/sales-reports/new">
-                  <Plus className="mr-2 h-4 w-4" />
-                  첫 번째 영업일지 작성하기
-                </Link>
-              </Button>
+              {!isViewer && (
+                <Button asChild className="mt-4">
+                  <Link href="/sales-reports/new">
+                    <Plus className="mr-2 h-4 w-4" />
+                    첫 번째 영업일지 작성하기
+                  </Link>
+                </Button>
+              )}
             </div>
           ) : (
             <Table>

@@ -17,6 +17,7 @@ import { toast } from "@/hooks/use-toast"
 import { LocationSelect } from "@/components/ui/location-select"
 import { SapCodeSelect } from "@/components/ui/sap-code-select"
 import { bizCodes, departmentCodes, employeeCodes, distributionTypeCodes, paymentTerms } from "@/lib/constants/sapCodes"
+import { getUserFromToken } from "@/lib/auth"
 
 export default function CompanyEditPage() {
   const params = useParams()
@@ -25,6 +26,8 @@ export default function CompanyEditPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [isViewer, setIsViewer] = useState(false)
+  const [isCheckingRole, setIsCheckingRole] = useState(true)
   
   // SAP코드여부 체크박스 상태
   const [sapHasPurchase, setSapHasPurchase] = useState(false)
@@ -79,6 +82,25 @@ export default function CompanyEditPage() {
   })
 
   useEffect(() => {
+    const currentUser = getUserFromToken();
+    if (!currentUser) {
+      router.push('/login');
+      return;
+    }
+    if (currentUser.role === 'viewer') {
+      setError('뷰어 권한은 회사를 수정할 수 없습니다.');
+      setIsViewer(true);
+      setIsCheckingRole(false);
+      router.replace(`/companies/${params.id}`);
+      return;
+    }
+    setIsCheckingRole(false);
+  }, [router, params.id])
+
+  useEffect(() => {
+    if (isCheckingRole || isViewer) {
+      return
+    }
     const loadCompany = async () => {
       try {
         setLoading(true)
@@ -182,7 +204,7 @@ export default function CompanyEditPage() {
     if (params.id) {
       loadCompany()
     }
-  }, [params.id])
+  }, [params.id, isCheckingRole, isViewer])
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({
@@ -305,6 +327,22 @@ export default function CompanyEditPage() {
     } finally {
       setSaving(false)
     }
+  }
+
+  if (isCheckingRole) {
+    return (
+      <div className="space-y-6">
+        <div className="text-center text-muted-foreground py-12">권한을 확인하는 중입니다...</div>
+      </div>
+    )
+  }
+
+  if (isViewer) {
+    return (
+      <div className="space-y-6">
+        <div className="text-center text-red-500 py-12">뷰어 권한은 회사를 수정할 수 없습니다.</div>
+      </div>
+    )
   }
 
   if (loading) {

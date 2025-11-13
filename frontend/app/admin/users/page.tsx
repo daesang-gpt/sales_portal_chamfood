@@ -160,8 +160,20 @@ export default function UsersManagementPage() {
                         <TableCell>{user.department}</TableCell>
                         <TableCell>{user.employee_number}</TableCell>
                         <TableCell>
-                          <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>
-                            {user.role === 'admin' ? '관리자' : '사용자'}
+                          <Badge
+                            variant={
+                              user.role === 'admin'
+                                ? 'default'
+                                : user.role === 'viewer'
+                                ? 'outline'
+                                : 'secondary'
+                            }
+                          >
+                            {user.role === 'admin'
+                              ? '관리자'
+                              : user.role === 'viewer'
+                              ? '뷰어'
+                              : '사용자'}
                           </Badge>
                         </TableCell>
                       </TableRow>
@@ -191,6 +203,12 @@ export default function UsersManagementPage() {
               <p className="text-sm text-muted-foreground">일반 사용자 수</p>
               <p className="text-2xl font-bold">
                 {users.filter(u => u.role === 'user').length}명
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-sm text-muted-foreground">뷰어 수</p>
+              <p className="text-2xl font-bold">
+                {users.filter(u => u.role === 'viewer').length}명
               </p>
             </div>
           </div>

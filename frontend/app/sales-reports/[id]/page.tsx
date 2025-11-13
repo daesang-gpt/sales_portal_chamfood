@@ -54,7 +54,8 @@ export default function SalesReportDetailPage() {
         if (currentUser) {
           const isAuthor = reportData.author === currentUser.id
           const isAdminUser = isAdmin()
-          setCanEdit(isAuthor || isAdminUser)
+          const isViewerUser = currentUser.role === 'viewer'
+          setCanEdit(!isViewerUser && (isAuthor || isAdminUser))
         }
       } catch (err) {
         console.error('[영업일지 상세] 오류:', err);

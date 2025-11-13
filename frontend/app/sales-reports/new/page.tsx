@@ -55,6 +55,24 @@ export default function NewSalesReportPage() {
   const [tagLoading, setTagLoading] = useState(false)
   const [isNewCompany, setIsNewCompany] = useState(false)
   const [productSuggestions, setProductSuggestions] = useState<string[]>([])
+  const [isViewer, setIsViewer] = useState(false)
+  const [isCheckingRole, setIsCheckingRole] = useState(true)
+
+  useEffect(() => {
+    const currentUser = getUserFromToken();
+    if (!currentUser) {
+      router.push('/login');
+      return;
+    }
+    if (currentUser.role === 'viewer') {
+      setError('뷰어 권한은 영업일지를 작성할 수 없습니다.');
+      setIsViewer(true);
+      setIsCheckingRole(false);
+      router.replace('/sales-reports');
+      return;
+    }
+    setIsCheckingRole(false);
+  }, [router])
 
   // 회사 선택 시 처리
   const handleCompanyChange = async (companyName: string, companyId?: string) => {
@@ -182,6 +200,22 @@ export default function NewSalesReportPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  if (isCheckingRole) {
+    return (
+      <div className="space-y-6">
+        <div className="text-center text-muted-foreground py-12">권한을 확인하는 중입니다...</div>
+      </div>
+    )
+  }
+
+  if (isViewer) {
+    return (
+      <div className="space-y-6">
+        <div className="text-center text-red-500 py-12">뷰어 권한은 영업일지를 작성할 수 없습니다.</div>
+      </div>
+    )
   }
 
   const handleInputChange = (field: string, value: string | number | undefined) => {

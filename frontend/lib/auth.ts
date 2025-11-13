@@ -1,11 +1,13 @@
 import { jwtDecode } from 'jwt-decode';
 
+type UserRole = 'admin' | 'user' | 'viewer';
+
 interface User {
   id: number;
   name: string;
   department: string;
   employee_number: string;
-  role: string;
+  role: UserRole;
 }
 
 interface JWTPayload {
@@ -51,20 +53,39 @@ export const isAuthenticated = (): boolean => {
 };
 
 // 사용자 권한 확인
-export const hasRole = (requiredRole: 'admin' | 'user'): boolean => {
+export const hasRole = (requiredRole: 'admin' | 'user' | 'viewer'): boolean => {
   const user = getUserFromToken();
   if (!user) return false;
   
-  if (requiredRole === 'admin') {
-    return user.role === 'admin';
+  switch (requiredRole) {
+    case 'admin':
+      return user.role === 'admin';
+    case 'viewer':
+      return user.role === 'viewer';
+    default:
+      return true; // user 권한은 모든 로그인 사용자가 접근 가능
   }
-  
-  return true; // user 권한은 모든 사용자가 접근 가능
 };
 
 // 관리자 권한 확인
 export const isAdmin = (): boolean => {
   return hasRole('admin');
+};
+
+export const isViewer = (): boolean => {
+  return hasRole('viewer');
+};
+
+export const hasGlobalViewAccess = (): boolean => {
+  const user = getUserFromToken();
+  if (!user) return false;
+  return user.role === 'admin' || user.role === 'viewer';
+};
+
+export const hasWritePermission = (): boolean => {
+  const user = getUserFromToken();
+  if (!user) return false;
+  return user.role !== 'viewer';
 };
 
 // 로그아웃

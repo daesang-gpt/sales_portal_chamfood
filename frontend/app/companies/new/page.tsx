@@ -16,6 +16,7 @@ import { useToast } from "@/hooks/use-toast"
 import { LocationSelect } from "@/components/ui/location-select"
 import { SapCodeSelect } from "@/components/ui/sap-code-select"
 import { bizCodes, departmentCodes, employeeCodes, distributionTypeCodes, paymentTerms } from "@/lib/constants/sapCodes"
+import { getUserFromToken } from "@/lib/auth"
 
 export default function NewCompanyPage() {
   const router = useRouter()
@@ -24,6 +25,28 @@ export default function NewCompanyPage() {
   // SAP코드여부 체크박스 상태
   const [sapHasPurchase, setSapHasPurchase] = useState(false)
   const [sapHasSales, setSapHasSales] = useState(false)
+  const [isViewer, setIsViewer] = useState(false)
+  const [isCheckingRole, setIsCheckingRole] = useState(true)
+
+  useEffect(() => {
+    const currentUser = getUserFromToken();
+    if (!currentUser) {
+      router.push('/login');
+      return;
+    }
+    if (currentUser.role === 'viewer') {
+      setIsViewer(true);
+      setIsCheckingRole(false);
+      toast({
+        title: "접근 불가",
+        description: "뷰어 권한은 회사를 등록할 수 없습니다.",
+        variant: "destructive"
+      });
+      router.replace('/companies');
+      return;
+    }
+    setIsCheckingRole(false);
+  }, [router, toast])
   
   const [formData, setFormData] = useState({
     // 필수 필드
@@ -132,6 +155,22 @@ export default function NewCompanyPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  if (isCheckingRole) {
+    return (
+      <div className="space-y-6">
+        <div className="text-center text-muted-foreground py-12">권한을 확인하는 중입니다...</div>
+      </div>
+    )
+  }
+
+  if (isViewer) {
+    return (
+      <div className="space-y-6">
+        <div className="text-center text-red-500 py-12">뷰어 권한은 회사를 등록할 수 없습니다.</div>
+      </div>
+    )
   }
 
   return (
