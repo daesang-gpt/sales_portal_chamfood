@@ -295,8 +295,41 @@ class CompanyViewSet(viewsets.ModelViewSet):
             from datetime import datetime
             
             with transaction.atomic():
-                # 기존 재무 정보 삭제 (선택적으로)
-                # 또는 업데이트/생성만 수행
+                # 기존 재무 정보 삭제 (제공된 재무 정보만 유지하기 위해)
+                # financial_statuses가 빈 배열이면 모든 재무 정보 삭제
+                # financial_statuses에 항목이 있으면 해당 항목만 유지하고 나머지 삭제
+                
+                # 유효한 fiscal_year 목록 수집
+                valid_fiscal_years = []
+                for financial_data in financial_statuses:
+                    if not financial_data.get('fiscal_year'):
+                        continue
+                    
+                    try:
+                        fiscal_year_str = financial_data['fiscal_year']
+                        if isinstance(fiscal_year_str, str):
+                            # YYYY-MM-DD 형식 또는 YYYY 형식 처리
+                            if len(fiscal_year_str) == 4:
+                                fiscal_year = datetime.strptime(fiscal_year_str + '-01-01', '%Y-%m-%d').date()
+                            else:
+                                fiscal_year = datetime.strptime(fiscal_year_str.split('T')[0], '%Y-%m-%d').date()
+                        else:
+                            fiscal_year = fiscal_year_str
+                        valid_fiscal_years.append(fiscal_year)
+                    except Exception:
+                        continue
+                
+                # 기존 재무 정보 중 유효한 fiscal_year에 해당하지 않는 것들 삭제
+                if valid_fiscal_years:
+                    # 유효한 fiscal_year에 해당하지 않는 재무 정보 삭제
+                    CompanyFinancialStatus.objects.filter(
+                        company=instance
+                    ).exclude(fiscal_year__in=valid_fiscal_years).delete()
+                else:
+                    # valid_fiscal_years가 비어있으면 모든 재무 정보 삭제
+                    CompanyFinancialStatus.objects.filter(company=instance).delete()
+                
+                # 재무 정보 생성 또는 업데이트
                 for financial_data in financial_statuses:
                     if not financial_data.get('fiscal_year'):
                         continue
@@ -347,8 +380,8 @@ class ReportViewSet(viewsets.ModelViewSet):
         # author만 select_related로 미리 로드 (company_code는 serializer에서 필요 시 로드)
         queryset = Report.objects.select_related('author').all()
         
-        # 방문일자 기준으로 내림차순 정렬 (최신순)
-        return queryset.order_by('-visitDate')
+        # 방문일자 기준으로 내림차순 정렬 (최신순) + 회사명으로 추가 정렬 (일관된 정렬 보장)
+        return queryset.order_by('-visitDate', 'company_name')
 
     def perform_create(self, serializer):
         # 현재 사용자를 author로 설정하고 작성자명, 팀명 저장
@@ -1356,13 +1389,36 @@ class SalesReportListView(ListAPIView):
             # 모든 사용자(관리자, 일반 사용자)가 전체 영업일지를 볼 수 있도록 수정
             # Oracle에서 company_code FK는 문자열 타입이므로 select_related 사용 시 문제 발생 가능
             # author만 select_related로 미리 로드 (company_code는 serializer에서 필요 시 로드)
-            queryset = Report.objects.select_related('author').all()
+            # 데이터베이스 연결 문제를 방지하기 위해 select_related를 안전하게 사용
+            # select_related는 쿼리 최적화를 위한 것이므로 실패해도 일반 쿼리셋으로 폴백 가능
+            queryset = Report.objects.all()
+            try:
+                # select_related를 시도하되, 실패해도 계속 진행
+                queryset = queryset.select_related('author')
+            except Exception as e:
+                # select_related 실패 시 일반 쿼리셋 사용 (N+1 쿼리 문제는 있지만 동작은 함)
+                print(f"[SalesReportListView] select_related 실패, 일반 쿼리셋 사용: {str(e)}")
+                queryset = Report.objects.all()
             
             # 검색/필터/정렬
             search = self.request.query_params.get('search', '').strip()
             period = self.request.query_params.get('period', 'all')
             ordering = self.request.query_params.get('ordering', '-visitDate')
             company_id = self.request.query_params.get('companyId', '').strip()
+            
+            # 동일한 방문일자일 때 일관된 정렬을 위해 회사명을 추가 정렬 기준으로 사용
+            # ordering이 방문일자만 포함하는 경우 회사명을 추가
+            if ordering and ordering.strip():
+                ordering_parts = [o.strip() for o in ordering.split(',')]
+                # 방문일자 관련 정렬만 있고 회사명 정렬이 없는 경우 추가
+                has_visit_date = any('visitDate' in part or 'visit_date' in part for part in ordering_parts)
+                has_company_name = any('company_name' in part for part in ordering_parts)
+                if has_visit_date and not has_company_name:
+                    # 방문일자 정렬에 회사명을 추가 정렬 기준으로 추가
+                    ordering = f"{ordering},company_name"
+            else:
+                # 기본 정렬: 방문일자 내림차순 + 회사명 오름차순
+                ordering = '-visitDate,company_name'
 
             if company_id:
                 # company_code FK는 to_field='company_code'로 설정되어 있으므로 직접 비교 가능
@@ -1386,18 +1442,57 @@ class SalesReportListView(ListAPIView):
                     # 안전한 필터링으로 폴백 (company_code만)
                     queryset = queryset.filter(company_code=company_id)
             if search:
-                queryset = queryset.filter(
+                # 검색 필터 구성 - author_name은 저장된 필드이므로 안전하게 사용
+                # author FK 관련 필터는 select_related로 로드되었지만, 안전성을 위해 분리
+                search_filters = (
                     Q(company_name__icontains=search) |
-                    Q(author__username__icontains=search) |
-                    Q(author__name__icontains=search) |
                     Q(author_name__icontains=search) |
                     Q(tags__icontains=search)
                 )
+                
+                # author FK 관련 필터 추가 (author는 CASCADE이므로 항상 존재해야 함)
+                # 하지만 데이터베이스 연결 문제나 쿼리 최적화 문제를 방지하기 위해 안전하게 처리
+                author_filters = Q(author__username__icontains=search) | Q(author__name__icontains=search)
+                search_filters |= author_filters
+                
+                # 쿼리 실행 시 예외 처리
+                try:
+                    queryset = queryset.filter(search_filters)
+                except Exception as e:
+                    # 쿼리 실행 실패 시 author 필터 없이 재시도
+                    print(f"[SalesReportListView] 검색 필터 실행 중 오류 발생, author 필터 제외하고 재시도: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+                    # author 필터 없이 재시도
+                    search_filters_fallback = (
+                        Q(company_name__icontains=search) |
+                        Q(author_name__icontains=search) |
+                        Q(tags__icontains=search)
+                    )
+                    queryset = queryset.filter(search_filters_fallback)
             if period in ['1m', '3m', '6m']:
                 months = int(period[0])
                 start_date = timezone.now().date() - timedelta(days=30 * months)
                 queryset = queryset.filter(visitDate__gte=start_date)
-            queryset = queryset.order_by(ordering)
+            
+            # 정렬 처리 - 예외 발생 시 기본 정렬 사용
+            try:
+                # ordering이 문자열인 경우 쉼표로 분리하여 처리
+                if isinstance(ordering, str):
+                    ordering_list = [o.strip() for o in ordering.split(',') if o.strip()]
+                    queryset = queryset.order_by(*ordering_list)
+                else:
+                    queryset = queryset.order_by(ordering)
+            except Exception as e:
+                print(f"[SalesReportListView] order_by 실패, 기본 정렬 사용: {str(e)}")
+                # 기본 정렬로 폴백: 방문일자 내림차순 + 회사명 오름차순
+                try:
+                    queryset = queryset.order_by('-visitDate', 'company_name')
+                except Exception as e2:
+                    print(f"[SalesReportListView] 기본 정렬도 실패: {str(e2)}")
+                    # 최후의 수단: 방문일자만
+                    queryset = queryset.order_by('-visitDate')
+            
             return queryset
         except Exception as e:
             import traceback

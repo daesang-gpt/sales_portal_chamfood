@@ -274,7 +274,7 @@ export default function CompanyEditPage() {
         }
       })
 
-      // 재무 정보 추가 (값이 있는 경우만)
+      // 재무 정보 추가 (삭제를 위해 항상 전송, 빈 배열도 포함)
       const validFinancialStatuses = financialStatuses.filter(fs => 
         fs.fiscal_year && (
           fs.total_assets || fs.capital || fs.total_equity || 
@@ -282,9 +282,8 @@ export default function CompanyEditPage() {
         )
       )
       
-      if (validFinancialStatuses.length > 0) {
-        cleanData.financial_statuses = validFinancialStatuses
-      }
+      // 재무 정보를 항상 전송 (빈 배열도 포함하여 삭제 처리)
+      cleanData.financial_statuses = validFinancialStatuses
 
       const updatedCompany = await companyApi.updateCompany(params.id as string, cleanData)
       
