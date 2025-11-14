@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { ArrowLeft, Save, Loader2, Building2, Phone, MapPin, Calendar, DollarSign, Plus, Trash2 } from "lucide-react"
 import Link from "next/link"
-import { useParams, useRouter } from "next/navigation"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { companyApi, Company, companyFinancialStatusApi, CompanyFinancialStatus } from "@/lib/api"
 import { toast } from "@/hooks/use-toast"
 import { LocationSelect } from "@/components/ui/location-select"
@@ -22,6 +22,10 @@ import { getUserFromToken } from "@/lib/auth"
 export default function CompanyEditPage() {
   const params = useParams()
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const page = searchParams.get("page") || "1"
+  const search = searchParams.get("search") || ""
+  const customerClassification = searchParams.get("customer_classification") || ""
   const [company, setCompany] = useState<Company | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -314,8 +318,12 @@ export default function CompanyEditPage() {
         description: "회사 정보가 성공적으로 수정되었습니다.",
       })
       
-      // 상세 페이지로 이동
-      router.push(`/companies/${params.id}`)
+      // 상세 페이지로 이동 (파라미터 유지)
+      const detailParams = new URLSearchParams()
+      if (page !== "1") detailParams.set("page", page)
+      if (search) detailParams.set("search", search)
+      if (customerClassification) detailParams.set("customer_classification", customerClassification)
+      router.push(`/companies/${params.id}${detailParams.toString() ? `?${detailParams.toString()}` : ''}`)
       
     } catch (err) {
       console.error('Error updating company:', err)
@@ -362,7 +370,7 @@ export default function CompanyEditPage() {
         <div className="text-center">
           <p className="text-red-500 mb-4">{error || '회사 정보를 찾을 수 없습니다.'}</p>
           <Button asChild>
-            <Link href="/companies">목록으로 돌아가기</Link>
+            <Link href={`/companies?page=${page}${search ? `&search=${encodeURIComponent(search)}` : ''}${customerClassification ? `&customer_classification=${encodeURIComponent(customerClassification)}` : ''}`}>목록으로 돌아가기</Link>
           </Button>
         </div>
       </div>
@@ -374,7 +382,7 @@ export default function CompanyEditPage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
           <Button variant="outline" size="sm" asChild>
-            <Link href={`/companies/${params.id}`}>
+            <Link href={`/companies/${params.id}?page=${page}${search ? `&search=${encodeURIComponent(search)}` : ''}${customerClassification ? `&customer_classification=${encodeURIComponent(customerClassification)}` : ''}`}>
               <ArrowLeft className="mr-2 h-4 w-4" />
               상세보기로
             </Link>
@@ -859,7 +867,7 @@ export default function CompanyEditPage() {
         {/* 저장 버튼 */}
         <div className="flex justify-end space-x-4">
           <Button variant="outline" asChild>
-            <Link href={`/companies/${params.id}`}>취소</Link>
+            <Link href={`/companies/${params.id}?page=${page}${search ? `&search=${encodeURIComponent(search)}` : ''}${customerClassification ? `&customer_classification=${encodeURIComponent(customerClassification)}` : ''}`}>취소</Link>
           </Button>
           <Button type="submit" disabled={saving}>
             {saving ? (

@@ -60,6 +60,12 @@ export interface CompanyStats {
   potentialCustomers: number;
   newCustomers: number;
   existingCustomers: number;
+  churnedCustomers: number;
+  filteredTotal?: number;
+  filteredPotentialCustomers?: number;
+  filteredNewCustomers?: number;
+  filteredExistingCustomers?: number;
+  filteredChurnedCustomers?: number;
 }
 
 // 회사 제안 타입 (자동완성)

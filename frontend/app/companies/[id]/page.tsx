@@ -20,6 +20,7 @@ export default function CompanyDetailPage() {
   const searchParams = useSearchParams();
   const page = searchParams.get("page") || "1";
   const search = searchParams.get("search") || "";
+  const customerClassification = searchParams.get("customer_classification") || "";
   
   const [company, setCompany] = useState<Company | null>(null)
   const [loading, setLoading] = useState(true)
@@ -207,6 +208,7 @@ export default function CompanyDetailPage() {
       const params = new URLSearchParams();
       if (page !== "1") params.set("page", page);
       if (search) params.set("search", search);
+      if (customerClassification) params.set("customer_classification", customerClassification);
       router.push(`/companies${params.toString() ? `?${params.toString()}` : ''}`);
     } catch (err: any) {
       console.error('회사 삭제 오류:', err);
@@ -309,7 +311,7 @@ export default function CompanyDetailPage() {
         <div className="text-center">
           <p className="text-red-500 mb-4">{error || '회사 정보를 찾을 수 없습니다.'}</p>
           <Button asChild>
-            <Link href={`/companies?page=${page}${search ? `&search=${encodeURIComponent(search)}` : ''}`}>목록으로 돌아가기</Link>
+            <Link href={`/companies?page=${page}${search ? `&search=${encodeURIComponent(search)}` : ''}${customerClassification ? `&customer_classification=${encodeURIComponent(customerClassification)}` : ''}`}>목록으로 돌아가기</Link>
           </Button>
         </div>
       </div>
@@ -321,7 +323,7 @@ export default function CompanyDetailPage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
           <Button variant="outline" size="sm" asChild>
-            <Link href={`/companies?page=${page}${search ? `&search=${encodeURIComponent(search)}` : ''}`}>
+            <Link href={`/companies?page=${page}${search ? `&search=${encodeURIComponent(search)}` : ''}${customerClassification ? `&customer_classification=${encodeURIComponent(customerClassification)}` : ''}`}>
               <ArrowLeft className="mr-2 h-4 w-4" />
               목록으로
             </Link>
@@ -343,7 +345,7 @@ export default function CompanyDetailPage() {
         <div className="flex gap-2">
           {!isViewerUser && (
             <Button asChild>
-              <Link href={`/companies/${company.company_code}/edit?page=${page}${search ? `&search=${encodeURIComponent(search)}` : ''}`}>
+              <Link href={`/companies/${company.company_code}/edit?page=${page}${search ? `&search=${encodeURIComponent(search)}` : ''}${customerClassification ? `&customer_classification=${encodeURIComponent(customerClassification)}` : ''}`}>
                 <Edit className="mr-2 h-4 w-4" />
                 수정
               </Link>

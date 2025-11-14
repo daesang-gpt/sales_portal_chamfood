@@ -100,9 +100,19 @@ class CompanyViewSet(viewsets.ModelViewSet):
         ordering = self.request.query_params.get('ordering', '-company_code')
 
         if search:
+            # 검색어에서 공백 제거 (공백이 있는 이름과 없는 이름 모두 검색하기 위해)
+            normalized_search = search.replace(' ', '')
+            
+            # employee_name 필드에 공백 제거된 버전을 annotate로 추가
+            queryset = queryset.annotate(
+                employee_name_norm=Replace('employee_name', Value(' '), Value(''))
+            )
+            
+            # 기존 검색 조건 + 공백 제거된 employee_name 검색 조건
             queryset = queryset.filter(
                 Q(company_name__icontains=search) |
                 Q(employee_name__icontains=search) |
+                Q(employee_name_norm__icontains=normalized_search) |
                 Q(contact_person__icontains=search) |
                 Q(company_code__icontains=search) |
                 Q(company_code_sap__icontains=search)
@@ -309,6 +319,7 @@ class CompanyViewSet(viewsets.ModelViewSet):
 
     def update(self, request, *args, **kwargs):
         """회사 정보 수정 시 재무 정보도 함께 처리하고 고객 구분 자동 계산"""
+        logger = logging.getLogger(__name__)
         instance = self.get_object()
         partial = kwargs.pop('partial', False)
         
@@ -328,75 +339,99 @@ class CompanyViewSet(viewsets.ModelViewSet):
             from django.db import transaction
             from datetime import datetime
             
-            with transaction.atomic():
-                # 기존 재무 정보 삭제 (제공된 재무 정보만 유지하기 위해)
-                # financial_statuses가 빈 배열이면 모든 재무 정보 삭제
-                # financial_statuses에 항목이 있으면 해당 항목만 유지하고 나머지 삭제
-                
-                # 유효한 fiscal_year 목록 수집
-                valid_fiscal_years = []
-                for financial_data in financial_statuses:
-                    if not financial_data.get('fiscal_year'):
-                        continue
+            try:
+                with transaction.atomic():
+                    # financial_statuses가 리스트인지 확인
+                    if not isinstance(financial_statuses, list):
+                        logger.warning(f"financial_statuses가 리스트가 아닙니다: {type(financial_statuses)}")
+                        financial_statuses = []
                     
-                    try:
-                        fiscal_year_str = financial_data['fiscal_year']
-                        if isinstance(fiscal_year_str, str):
-                            # YYYY-MM-DD 형식 또는 YYYY 형식 처리
-                            if len(fiscal_year_str) == 4:
-                                fiscal_year = datetime.strptime(fiscal_year_str + '-01-01', '%Y-%m-%d').date()
-                            else:
-                                fiscal_year = datetime.strptime(fiscal_year_str.split('T')[0], '%Y-%m-%d').date()
-                        else:
-                            fiscal_year = fiscal_year_str
-                        valid_fiscal_years.append(fiscal_year)
-                    except Exception:
-                        continue
-                
-                # 기존 재무 정보 중 유효한 fiscal_year에 해당하지 않는 것들 삭제
-                if valid_fiscal_years:
-                    # 유효한 fiscal_year에 해당하지 않는 재무 정보 삭제
-                    CompanyFinancialStatus.objects.filter(
-                        company=instance
-                    ).exclude(fiscal_year__in=valid_fiscal_years).delete()
-                else:
-                    # valid_fiscal_years가 비어있으면 모든 재무 정보 삭제
-                    CompanyFinancialStatus.objects.filter(company=instance).delete()
-                
-                # 재무 정보 생성 또는 업데이트
-                for financial_data in financial_statuses:
-                    if not financial_data.get('fiscal_year'):
-                        continue
+                    # 기존 재무 정보 삭제 (제공된 재무 정보만 유지하기 위해)
+                    # financial_statuses가 빈 배열이면 모든 재무 정보 삭제
+                    # financial_statuses에 항목이 있으면 해당 항목만 유지하고 나머지 삭제
                     
-                    try:
-                        # 날짜 파싱
-                        fiscal_year_str = financial_data['fiscal_year']
-                        if isinstance(fiscal_year_str, str):
-                            # YYYY-MM-DD 형식 또는 YYYY 형식 처리
-                            if len(fiscal_year_str) == 4:
-                                fiscal_year = datetime.strptime(fiscal_year_str + '-01-01', '%Y-%m-%d').date()
-                            else:
-                                fiscal_year = datetime.strptime(fiscal_year_str.split('T')[0], '%Y-%m-%d').date()
-                        else:
-                            fiscal_year = fiscal_year_str
+                    # 유효한 fiscal_year 목록 수집
+                    valid_fiscal_years = []
+                    for financial_data in financial_statuses:
+                        if not isinstance(financial_data, dict):
+                            continue
+                        if not financial_data.get('fiscal_year'):
+                            continue
                         
-                        # 재무 정보 생성 또는 업데이트
-                        CompanyFinancialStatus.objects.update_or_create(
-                            company=instance,
-                            fiscal_year=fiscal_year,
-                            defaults={
-                                'total_assets': int(financial_data.get('total_assets', 0) or 0),
-                                'capital': int(financial_data.get('capital', 0) or 0),
-                                'total_equity': int(financial_data.get('total_equity', 0) or 0),
-                                'revenue': int(financial_data.get('revenue', 0) or 0),
-                                'operating_income': int(financial_data.get('operating_income', 0) or 0),
-                                'net_income': int(financial_data.get('net_income', 0) or 0),
-                            }
-                        )
-                    except Exception as e:
-                        # 재무 정보 처리 오류는 무시하거나 로그만 남김
-                        logger.debug(f"재무 정보 처리 오류: {e}")
-                        pass
+                        try:
+                            fiscal_year_str = financial_data['fiscal_year']
+                            if isinstance(fiscal_year_str, str):
+                                # YYYY-MM-DD 형식 또는 YYYY 형식 처리
+                                if len(fiscal_year_str) == 4:
+                                    fiscal_year = datetime.strptime(fiscal_year_str + '-01-01', '%Y-%m-%d').date()
+                                else:
+                                    fiscal_year = datetime.strptime(fiscal_year_str.split('T')[0], '%Y-%m-%d').date()
+                            else:
+                                fiscal_year = fiscal_year_str
+                            valid_fiscal_years.append(fiscal_year)
+                        except Exception as e:
+                            logger.warning(f"fiscal_year 파싱 오류: {e}, financial_data: {financial_data}")
+                            continue
+                    
+                    # 기존 재무 정보 중 유효한 fiscal_year에 해당하지 않는 것들 삭제
+                    if valid_fiscal_years:
+                        # 유효한 fiscal_year에 해당하지 않는 재무 정보 삭제
+                        CompanyFinancialStatus.objects.filter(
+                            company=instance
+                        ).exclude(fiscal_year__in=valid_fiscal_years).delete()
+                    else:
+                        # valid_fiscal_years가 비어있으면 모든 재무 정보 삭제
+                        CompanyFinancialStatus.objects.filter(company=instance).delete()
+                    
+                    # 재무 정보 생성 또는 업데이트
+                    for financial_data in financial_statuses:
+                        if not isinstance(financial_data, dict):
+                            continue
+                        if not financial_data.get('fiscal_year'):
+                            continue
+                        
+                        try:
+                            # 날짜 파싱
+                            fiscal_year_str = financial_data['fiscal_year']
+                            if isinstance(fiscal_year_str, str):
+                                # YYYY-MM-DD 형식 또는 YYYY 형식 처리
+                                if len(fiscal_year_str) == 4:
+                                    fiscal_year = datetime.strptime(fiscal_year_str + '-01-01', '%Y-%m-%d').date()
+                                else:
+                                    fiscal_year = datetime.strptime(fiscal_year_str.split('T')[0], '%Y-%m-%d').date()
+                            else:
+                                fiscal_year = fiscal_year_str
+                            
+                            # 숫자 값 안전하게 변환
+                            def safe_int(value, default=0):
+                                if value is None or value == '':
+                                    return default
+                                try:
+                                    return int(float(str(value)))
+                                except (ValueError, TypeError):
+                                    return default
+                            
+                            # 재무 정보 생성 또는 업데이트
+                            CompanyFinancialStatus.objects.update_or_create(
+                                company=instance,
+                                fiscal_year=fiscal_year,
+                                defaults={
+                                    'total_assets': safe_int(financial_data.get('total_assets')),
+                                    'capital': safe_int(financial_data.get('capital')),
+                                    'total_equity': safe_int(financial_data.get('total_equity')),
+                                    'revenue': safe_int(financial_data.get('revenue')),
+                                    'operating_income': safe_int(financial_data.get('operating_income')),
+                                    'net_income': safe_int(financial_data.get('net_income')),
+                                }
+                            )
+                        except Exception as e:
+                            # 재무 정보 처리 오류는 로그에 남기고 계속 진행
+                            logger.error(f"재무 정보 처리 오류: {e}, financial_data: {financial_data}", exc_info=True)
+                            continue
+            except Exception as e:
+                # 재무 정보 처리 중 전체적인 오류 발생 시 로그에 남기고 계속 진행
+                logger.error(f"재무 정보 처리 중 전체 오류: {e}", exc_info=True)
+                # 회사 정보는 이미 업데이트되었으므로 계속 진행
         
         if getattr(instance, '_prefetched_objects_cache', None):
             instance._prefetched_objects_cache = {}
@@ -957,29 +992,60 @@ def change_password_view(request):
 def company_stats_view(request):
     """회사 통계 정보를 반환하는 API"""
     try:
-        # 전체 회사 수
-        total_companies = Company.objects.count()
+        # 쿼리 파라미터 받기 (검색어만 사용)
+        search = request.query_params.get('search', None)
         
-        # 잠재 거래처 수 (customer_classification이 '잠재'인 경우)
-        potential_customers = Company.objects.filter(
-            customer_classification='잠재'
-        ).count()
+        # 기본 queryset
+        base_queryset = Company.objects.all()
         
-        # 신규 거래처 수 (customer_classification이 '신규'인 경우)
-        new_customers = Company.objects.filter(
-            customer_classification='신규'
-        ).count()
+        # 필터링 적용 (검색어만 사용, 고객구분 필터는 제외)
+        filtered_queryset = base_queryset
+        if search:
+            normalized_search = search.replace(' ', '')
+            filtered_queryset = filtered_queryset.annotate(
+                employee_name_norm=Replace('employee_name', Value(' '), Value(''))
+            )
+            filtered_queryset = filtered_queryset.filter(
+                Q(company_name__icontains=search) |
+                Q(employee_name__icontains=search) |
+                Q(employee_name_norm__icontains=normalized_search) |
+                Q(contact_person__icontains=search) |
+                Q(company_code__icontains=search) |
+                Q(company_code_sap__icontains=search)
+            )
         
-        # 기존 거래처 수 (customer_classification이 '기존'인 경우)
-        existing_customers = Company.objects.filter(
-            customer_classification='기존'
-        ).count()
+        # 전체 통계
+        total_companies = base_queryset.count()
+        potential_customers = base_queryset.filter(customer_classification='잠재').count()
+        new_customers = base_queryset.filter(customer_classification='신규').count()
+        existing_customers = base_queryset.filter(customer_classification='기존').count()
+        churned_customers = base_queryset.filter(customer_classification='이탈').count()
+        
+        # 필터링된 통계 (검색어가 있을 때만 계산)
+        filtered_total = None
+        filtered_potential = None
+        filtered_new = None
+        filtered_existing = None
+        filtered_churned = None
+        
+        if search:
+            filtered_total = filtered_queryset.count()
+            filtered_potential = filtered_queryset.filter(customer_classification='잠재').count()
+            filtered_new = filtered_queryset.filter(customer_classification='신규').count()
+            filtered_existing = filtered_queryset.filter(customer_classification='기존').count()
+            filtered_churned = filtered_queryset.filter(customer_classification='이탈').count()
         
         return Response({
             'total': total_companies,
             'potentialCustomers': potential_customers,
             'newCustomers': new_customers,
-            'existingCustomers': existing_customers
+            'existingCustomers': existing_customers,
+            'churnedCustomers': churned_customers,
+            'filteredTotal': filtered_total,
+            'filteredPotentialCustomers': filtered_potential,
+            'filteredNewCustomers': filtered_new,
+            'filteredExistingCustomers': filtered_existing,
+            'filteredChurnedCustomers': filtered_churned
         }, status=status.HTTP_200_OK)
         
     except Exception as e:
@@ -1183,11 +1249,13 @@ def dashboard_charts_data_view(request):
             monthly_profit = sum((sales.매출이익 or 0) for sales in monthly_sales_queryset)
             monthly_quantity = sum((sales.Box or 0) for sales in monthly_sales_queryset)
             monthly_transactions = monthly_sales_queryset.count()
+            monthly_gp = round((monthly_profit / monthly_revenue * 100), 1) if monthly_revenue > 0 else 0.0
       
             sales_data.append({
                 'name': month_name,
                 '매출액': monthly_revenue,
                 '매출이익': monthly_profit,
+                'GP': monthly_gp,
                 '매출수량': monthly_quantity or (monthly_transactions * 50),  # 월련량 또는 추정량
                 '매출건수': monthly_transactions
             })
@@ -1266,10 +1334,151 @@ def dashboard_charts_data_view(request):
                 {'company': '데이터 없음', 'type': '대면', 'date': '2025-01-01', 'author': '시스템'}
             ]
         
+        # 축종별 매출 데이터 생성 (최근 6개월)
+        livestock_data = []
+        try:
+            # 최근 6개월 기간 계산
+            earliest_dt = now
+            for i in range(5, -1, -1):
+                ty, tm = current_year, current_month - i
+                if tm <= 0:
+                    tm += 12
+                    ty -= 1
+                if i == 5:
+                    earliest_dt = earliest_dt.replace(year=ty, month=tm, day=1)
+            start_date = earliest_dt.date()
+            end_date = now.replace(day=monthrange(current_year, current_month)[1]).date()
+            
+            # 각 월별로 축종별 데이터 집계
+            for i in range(6):
+                target_year = current_year
+                target_month = current_month - i
+                if target_month <= 0:
+                    target_month += 12
+                    target_year -= 1
+                
+                month_name = f"{target_month}월"
+                
+                # 해당 월의 매출 데이터 조회
+                monthly_sales = SalesData.objects.filter(
+                    매출일자__year=target_year,
+                    매출일자__month=target_month
+                )
+                
+                # 사용자별 필터링
+                normalized_name = (user.name or '').replace(' ', '') if hasattr(user, 'name') else ''
+                monthly_sales = monthly_sales.annotate(
+                    매출담당자_norm=Replace('매출담당자', Value(' '), Value(''))
+                )
+                if not has_global_view_access(user):
+                    monthly_sales = monthly_sales.filter(
+                        Q(매출담당자_norm__icontains=normalized_name)
+                    )
+                
+                # 축종별로 그룹화하여 집계
+                livestock_grouped = monthly_sales.values('축종').annotate(
+                    total_revenue=Sum('매출금액'),
+                    total_profit=Sum('매출이익')
+                )
+                
+                month_data = {'name': month_name}
+                for item in livestock_grouped:
+                    livestock_type = item['축종'] or '미지정'
+                    revenue = int(item['total_revenue'] or 0)
+                    profit = int(item['total_profit'] or 0)
+                    gp = round((profit / revenue * 100), 1) if revenue > 0 else 0.0
+                    month_data[f'{livestock_type}_매출액'] = revenue
+                    month_data[f'{livestock_type}_매출이익'] = profit
+                    month_data[f'{livestock_type}_GP'] = gp
+                
+                livestock_data.append(month_data)
+            
+            # 시간순으로 정렬
+            livestock_data = list(reversed(livestock_data))
+        except Exception as e:
+            print(f"[ERROR] 축종별 데이터 생성 중 오류: {str(e)}")
+            traceback.print_exc()
+            livestock_data = []
+        
+        # 팀별(매출부서별) 매출 데이터 생성 (최근 6개월)
+        team_data = []
+        try:
+            # 각 월별로 팀별 데이터 집계
+            for i in range(6):
+                target_year = current_year
+                target_month = current_month - i
+                if target_month <= 0:
+                    target_month += 12
+                    target_year -= 1
+                
+                month_name = f"{target_month}월"
+                
+                # 해당 월의 매출 데이터 조회
+                monthly_sales = SalesData.objects.filter(
+                    매출일자__year=target_year,
+                    매출일자__month=target_month
+                )
+                
+                # 사용자별 필터링
+                normalized_name = (user.name or '').replace(' ', '') if hasattr(user, 'name') else ''
+                monthly_sales = monthly_sales.annotate(
+                    매출담당자_norm=Replace('매출담당자', Value(' '), Value(''))
+                )
+                if not has_global_view_access(user):
+                    monthly_sales = monthly_sales.filter(
+                        Q(매출담당자_norm__icontains=normalized_name)
+                    )
+                
+                # 매출부서별로 그룹화하여 집계
+                team_grouped = monthly_sales.values('매출부서').annotate(
+                    total_revenue=Sum('매출금액'),
+                    total_profit=Sum('매출이익')
+                )
+                
+                month_data = {'name': month_name}
+                for item in team_grouped:
+                    team_name = item['매출부서'] or '미지정'
+                    # 팀명 정규화: 수도권1팀 → 가공장영업팀, 수도권2팀 → 도매영업팀
+                    normalized_team_name = team_name
+                    if team_name == '수도권1팀':
+                        normalized_team_name = '가공장영업팀'
+                    elif team_name == '수도권2팀':
+                        normalized_team_name = '도매영업팀'
+                    
+                    revenue = int(item['total_revenue'] or 0)
+                    profit = int(item['total_profit'] or 0)
+                    gp = round((profit / revenue * 100), 1) if revenue > 0 else 0.0
+                    
+                    # 정규화된 팀명으로 키 생성 (기존 팀명과 통합)
+                    base_key = normalized_team_name
+                    if base_key not in month_data or f'{base_key}_매출액' not in month_data:
+                        month_data[f'{base_key}_매출액'] = revenue
+                        month_data[f'{base_key}_매출이익'] = profit
+                        month_data[f'{base_key}_GP'] = gp
+                    else:
+                        # 이미 존재하는 경우 합산 (같은 팀의 다른 이름)
+                        month_data[f'{base_key}_매출액'] += revenue
+                        month_data[f'{base_key}_매출이익'] += profit
+                        # GP 재계산
+                        total_revenue = month_data[f'{base_key}_매출액']
+                        total_profit = month_data[f'{base_key}_매출이익']
+                        month_data[f'{base_key}_GP'] = round((total_profit / total_revenue * 100), 1) if total_revenue > 0 else 0.0
+                
+                team_data.append(month_data)
+            
+            # 시간순으로 정렬
+            team_data = list(reversed(team_data))
+        except Exception as e:
+            print(f"[ERROR] 팀별 데이터 생성 중 오류: {str(e)}")
+            traceback.print_exc()
+            team_data = []
+        
         return Response({
             'salesData': sales_data,
             'channelData': channel_data,
-            'recentActivities': recent_activities
+            'recentActivities': recent_activities,
+            'livestockData': livestock_data,
+            'teamData': team_data
         }, status=status.HTTP_200_OK)
         
     except Exception as e:
@@ -2219,6 +2428,237 @@ def upload_companies_csv(request):
     except Exception as e:
         logging.error(f'회사 CSV 업로드 오류: {e}')
         return Response({'error': '업로드 중 오류가 발생했습니다.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def upload_companies_sap_tsv(request):
+    """SAP 거래처 정보 TSV 파일을 업로드하여 기존 거래처 업데이트 또는 신규 거래처 추가"""
+    try:
+        # 관리자 권한 확인
+        if not hasattr(request.user, 'role') or request.user.role != 'admin':
+            return Response({'error': '관리자만 업로드할 수 있습니다.'}, status=status.HTTP_403_FORBIDDEN)
+        
+        if 'file' not in request.FILES:
+            return Response({'error': '파일이 필요합니다.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        tsv_file = request.FILES['file']
+        
+        # 파일 확장자 확인
+        file_extension = tsv_file.name.lower().split('.')[-1]
+        if file_extension not in ['tsv']:
+            return Response({'error': 'TSV 파일만 업로드 가능합니다.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # TSV 파일 읽기
+        try:
+            tsv_file.seek(0)
+            df = pd.read_csv(tsv_file, sep='\t', encoding='utf-8', keep_default_na=False, na_values=[''])
+        except Exception as e:
+            return Response({'error': f'TSV 파일 읽기 오류: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # 필수 컬럼 확인
+        required_columns = ['고객', '고객번호1']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            return Response({'error': f'파일에 필요한 컬럼이 없습니다: {", ".join(missing_columns)}'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        updated_count = 0
+        created_count = 0
+        errors = []
+        
+        def safe_get_value(row, col_name, default=None):
+            """안전하게 컬럼 값 가져오기 (빈 문자열은 None으로 변환)"""
+            if col_name in df.columns and pd.notna(row[col_name]):
+                value = str(row[col_name]).strip()
+                return value if value else None
+            return default
+        
+        def safe_get_date(row, col_name):
+            """날짜 필드 안전하게 가져오기"""
+            if col_name in df.columns and pd.notna(row[col_name]):
+                try:
+                    value = str(row[col_name]).strip()
+                    if not value:
+                        return None
+                    # 다양한 날짜 형식 시도
+                    if len(value) == 10 and '-' in value:
+                        return pd.to_datetime(value).date()
+                    elif len(value) == 8:  # YYYYMMDD 형식
+                        return pd.to_datetime(value, format='%Y%m%d').date()
+                    else:
+                        return pd.to_datetime(value).date()
+                except:
+                    return None
+            return None
+        
+        def extract_city_district(address):
+            """주소에서 시/구 부분 추출 (예: '서울특별시 강남구', '경기도 수원시 팔달구' 형식)"""
+            if not address:
+                return None
+            # 한국 주소 형식: 시/도 시/군/구 ...
+            import re
+            # 패턴 1: 시/도 + 시 + 구 (예: 경기도 수원시 팔달구, 경기도 안양시 동안구, 경기도 용인특례시 기흥구)
+            match = re.match(r'^([가-힣]+(?:특별시|광역시|도|특별자치시|특별자치도))\s+([가-힣]+(?:특례시|시))\s+([가-힣]+(?:구|군))', address)
+            if match:
+                return f"{match.group(1)} {match.group(2)} {match.group(3)}"
+            # 패턴 2: 시/도 + 구/군/시 (예: 서울특별시 강남구, 경기도 수원시)
+            match = re.match(r'^([가-힣]+(?:특별시|광역시|도|특별자치시|특별자치도))\s+([가-힣]+(?:구|군|시))', address)
+            if match:
+                return f"{match.group(1)} {match.group(2)}"
+            # 패턴 3: 시/도만 있는 경우 (예: 세종특별자치시)
+            match = re.match(r'^([가-힣]+(?:특별시|광역시|도|특별자치시|특별자치도))', address)
+            if match:
+                return match.group(1)
+            return None
+        
+        for index, row in df.iterrows():
+            try:
+                # 필수 필드 추출
+                customer_code = safe_get_value(row, '고객')  # company_code_sap와 매칭
+                company_name = safe_get_value(row, '고객번호1')  # 회사명
+                tax_id_value = safe_get_value(row, '사업자등록번호')  # tax_id와 매칭
+                
+                if not company_name:
+                    errors.append(f"행 {index + 2}: 회사명(고객번호1)이 없습니다.")
+                    continue
+                
+                # 매칭 로직: company_code_sap 먼저, 없으면 tax_id로 매칭
+                company = None
+                is_sap_code_new = False  # SAP코드가 처음 입력되는지 여부
+                if customer_code:
+                    # company_code_sap로 매칭 시도
+                    company = Company.objects.filter(company_code_sap=customer_code).first()
+                
+                if not company and tax_id_value:
+                    # tax_id로 매칭 시도
+                    company = Company.objects.filter(tax_id=tax_id_value).first()
+                    # 사업자등록번호로 매칭된 경우, 기존에 company_code_sap가 없었다면 SAP코드가 처음 입력되는 것
+                    if company and not company.company_code_sap and customer_code:
+                        is_sap_code_new = True
+                
+                # 필드 매핑 데이터 준비
+                update_data = {
+                    'company_name': company_name,
+                    # SAP 정보
+                    'company_code_sap': customer_code,
+                    'biz_code': safe_get_value(row, '사업'),
+                    'biz_name': safe_get_value(row, '사업부'),
+                    'department_code': safe_get_value(row, '지점/팀'),
+                    'department': safe_get_value(row, '내역'),
+                    'employee_number': safe_get_value(row, '사원번호'),
+                    'employee_name': safe_get_value(row, '사원명'),
+                    'distribution_type_sap_code': safe_get_value(row, '유통형태(소)'),
+                    'distribution_type_sap': safe_get_value(row, '유통형태(소)명'),
+                    'contact_person': safe_get_value(row, '계약담당자명'),
+                    'contact_phone': safe_get_value(row, '계약담당연락처'),
+                    'code_create_date': safe_get_date(row, '생성일'),
+                    'transaction_start_date': safe_get_date(row, '거래개시일'),
+                    'payment_terms': safe_get_value(row, '지급조건의 고유설명'),
+                    'tax_id': tax_id_value,
+                }
+                
+                # 주소 정보 처리
+                city = safe_get_value(row, '도시')
+                detail_address = safe_get_value(row, '상세주소')
+                
+                if company:
+                    # 기존 회사 업데이트
+                    # 주소 정보 (있는 경우)
+                    if city and detail_address:
+                        update_data['head_address'] = f"{city}, {detail_address}"
+                        update_data['city_district'] = extract_city_district(update_data['head_address'])
+                    elif detail_address:
+                        update_data['head_address'] = detail_address
+                        update_data['city_district'] = extract_city_district(detail_address)
+                    elif city:
+                        update_data['head_address'] = city
+                        update_data['city_district'] = extract_city_district(city)
+                    
+                    # 대표자명
+                    ceo_name = safe_get_value(row, '대표자명')
+                    if ceo_name:
+                        update_data['ceo_name'] = ceo_name
+                    
+                    # 전화번호
+                    phone = safe_get_value(row, '전화번호 1')
+                    if phone:
+                        update_data['main_phone'] = phone
+                    
+                    # 사업자등록번호로 매칭되어 SAP코드를 처음 입력하는 경우
+                    if is_sap_code_new:
+                        code_create_date = update_data.get('code_create_date')
+                        if code_create_date:
+                            from datetime import date
+                            today = date.today()
+                            days_diff = (today - code_create_date).days
+                            if days_diff <= 90:  # 3개월 이내
+                                update_data['customer_classification'] = '신규'
+                            else:  # 3개월 초과
+                                update_data['customer_classification'] = '기존'
+                        else:
+                            update_data['customer_classification'] = '기존'
+                        update_data['sap_code_type'] = '매출'
+                    
+                    # 업데이트 실행
+                    for key, value in update_data.items():
+                        if value is not None:
+                            setattr(company, key, value)
+                    company.save()
+                    updated_count += 1
+                else:
+                    # 신규 회사 생성
+                    # company_code 자동 생성: C{next_num:07d} 형식
+                    last_code = Company.objects.filter(company_code__startswith='C').aggregate(
+                        max_code=Max('company_code')
+                    )['max_code']
+                    if last_code and last_code[1:].isdigit():
+                        next_num = int(last_code[1:]) + 1
+                    else:
+                        next_num = 1
+                    new_code = f'C{next_num:07d}'
+                    
+                    update_data['company_code'] = new_code
+                    # 신규 등록 시 고객 구분과 SAP코드여부 설정
+                    update_data['customer_classification'] = '신규'
+                    update_data['sap_code_type'] = '매출'
+                    
+                    # 주소 정보 처리 (신규 등록)
+                    if city and detail_address:
+                        update_data['head_address'] = f"{city}, {detail_address}"
+                        update_data['city_district'] = extract_city_district(update_data['head_address'])
+                    elif detail_address:
+                        update_data['head_address'] = detail_address
+                        update_data['city_district'] = extract_city_district(detail_address)
+                    elif city:
+                        update_data['head_address'] = city
+                        update_data['city_district'] = extract_city_district(city)
+                    
+                    # 대표자명
+                    ceo_name = safe_get_value(row, '대표자명')
+                    if ceo_name:
+                        update_data['ceo_name'] = ceo_name
+                    
+                    # 전화번호 (전화번호 1 사용)
+                    phone = safe_get_value(row, '전화번호 1')
+                    if phone:
+                        update_data['main_phone'] = phone
+                    
+                    Company.objects.create(**update_data)
+                    created_count += 1
+                    
+            except Exception as e:
+                errors.append(f"행 {index + 2}: {str(e)}")
+                continue
+        
+        return Response({
+            'message': f'SAP 거래처 업로드 완료: {created_count}개 생성, {updated_count}개 업데이트',
+            'created_count': created_count,
+            'updated_count': updated_count,
+            'errors': errors[:10]  # 최대 10개 오류만 반환
+        })
+        
+    except Exception as e:
+        logging.error(f'SAP 거래처 TSV 업로드 오류: {e}')
+        return Response({'error': f'업로드 중 오류가 발생했습니다: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])

@@ -63,6 +63,42 @@ export default function AdminPage() {
     input.click();
   };
 
+  const uploadSapCompanies = () => {
+    console.log('SAP 거래처 업로드 함수 호출됨');
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.tsv';
+    input.onchange = async (event) => {
+      const file = (event.target as HTMLInputElement).files?.[0];
+      console.log('선택된 파일:', file);
+      if (file) {
+        console.log('파일 업로드 시작:', file.name, file.size);
+        try {
+          console.log('API 호출 시작');
+          const result = await companyApi.uploadCompaniesSapTsv(file);
+          console.log('업로드 결과:', result);
+          let message = `업로드 완료!\n신규 생성: ${result.created_count}건\n업데이트: ${result.updated_count}건`;
+          if (result.errors.length > 0) {
+            message += `\n\n총 오류: ${result.errors.length}개`;
+            if (result.errors.length <= 5) {
+              message += `\n\n오류 목록:\n${result.errors.join('\n')}`;
+            } else {
+              message += `\n\n오류 목록 (최대 5개):\n${result.errors.slice(0, 5).join('\n')}\n...`;
+            }
+            console.log('업로드 오류:', result.errors);
+          }
+          alert(message);
+        } catch (error: any) {
+          console.error('업로드 오류:', error);
+          alert(`업로드 실패: ${error.message}`);
+        }
+      } else {
+        console.log('파일이 선택되지 않음');
+      }
+    };
+    input.click();
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -208,6 +244,26 @@ export default function AdminPage() {
                 </Button>
                 <p className="text-xs text-gray-500 text-center">
                   필수 컬럼: 매출일자, 거래처명, 매출금액, 매출부서, 매출담당자 등
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>SAP 거래처 업로드</CardTitle>
+              <CardDescription>SAP 거래처 정보 TSV 파일을 업로드하여 기존 거래처를 업데이트하거나 신규 거래처를 추가합니다.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                <Button 
+                  className="w-full"
+                  onClick={() => uploadSapCompanies()}
+                >
+                  SAP 거래처 업로드 (TSV)
+                </Button>
+                <p className="text-xs text-gray-500 text-center">
+                  필수 컬럼: 고객, 고객번호1, 사업자등록번호 등
                 </p>
               </div>
             </CardContent>

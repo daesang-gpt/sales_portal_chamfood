@@ -23,9 +23,14 @@ const PERIOD_OPTIONS = [
 export default function SalesReportsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [inputValue, setInputValue] = useState("");
-  const [searchTerm, setSearchTerm] = useState("");
-  const [period, setPeriod] = useState("all");
+  
+  // URL 파라미터에서 초기값 읽기
+  const urlSearch = searchParams.get("search") || "";
+  const urlPeriod = searchParams.get("period") || "all";
+  
+  const [inputValue, setInputValue] = useState(urlSearch);
+  const [searchTerm, setSearchTerm] = useState(urlSearch);
+  const [period, setPeriod] = useState(urlPeriod);
   
   // URL의 page 파라미터를 단일 소스로 사용
   const currentPage = Number(searchParams.get("page")) || 1;
@@ -178,12 +183,12 @@ export default function SalesReportsPage() {
         <div className="flex items-center justify-between">
           <h1 className="text-3xl font-bold">영업일지 관리</h1>
           {!isViewer && (
-            <Button asChild>
-              <Link href="/sales-reports/new">
-                <Plus className="mr-2 h-4 w-4" />
-                영업일지 작성
-              </Link>
-            </Button>
+          <Button asChild>
+            <Link href="/sales-reports/new">
+              <Plus className="mr-2 h-4 w-4" />
+              영업일지 작성
+            </Link>
+          </Button>
           )}
         </div>
         <Card>
@@ -205,12 +210,12 @@ export default function SalesReportsPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">영업일지 관리</h1>
         {!isViewer && (
-          <Button asChild>
-            <Link href="/sales-reports/new">
-              <Plus className="mr-2 h-4 w-4" />
-              영업일지 작성
-            </Link>
-          </Button>
+        <Button asChild>
+          <Link href="/sales-reports/new">
+            <Plus className="mr-2 h-4 w-4" />
+            영업일지 작성
+          </Link>
+        </Button>
         )}
       </div>
       <Card>
@@ -247,12 +252,12 @@ export default function SalesReportsPage() {
             <div className="text-center py-8">
               <p className="text-muted-foreground">등록된 영업일지가 없습니다.</p>
               {!isViewer && (
-                <Button asChild className="mt-4">
-                  <Link href="/sales-reports/new">
-                    <Plus className="mr-2 h-4 w-4" />
-                    첫 번째 영업일지 작성하기
-                  </Link>
-                </Button>
+              <Button asChild className="mt-4">
+                <Link href="/sales-reports/new">
+                  <Plus className="mr-2 h-4 w-4" />
+                  첫 번째 영업일지 작성하기
+                </Link>
+              </Button>
               )}
             </div>
           ) : (

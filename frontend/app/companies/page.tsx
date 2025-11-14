@@ -9,10 +9,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Search, Plus, Building2, Loader2, ChevronLeft, ChevronRight } from "lucide-react"
 import Link from "next/link"
 import { companyApi, Company, CompanyFilters, PaginatedResponse } from "@/lib/api"
+import { CompanyStats } from "@/lib/types/company"
 import { PaginationInput } from "@/components/ui/pagination"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { getUserFromToken } from "@/lib/auth"
 
 export default function CompaniesPage() {
@@ -25,12 +25,19 @@ export default function CompaniesPage() {
   const urlCustomerClassification = searchParams.get("customer_classification") || "";
   
   const [companies, setCompanies] = useState<Company[]>([])
-  const [stats, setStats] = useState({
+  const [stats, setStats] = useState<CompanyStats>({
     total: 0,
     potentialCustomers: 0,
     newCustomers: 0,
-    existingCustomers: 0
+    existingCustomers: 0,
+    churnedCustomers: 0,
+    filteredTotal: undefined,
+    filteredPotentialCustomers: undefined,
+    filteredNewCustomers: undefined,
+    filteredExistingCustomers: undefined,
+    filteredChurnedCustomers: undefined
   })
+  // URL 파라미터에서 초기값 설정
   const [searchTerm, setSearchTerm] = useState(urlSearchTerm);
   const [pendingSearch, setPendingSearch] = useState(urlSearchTerm);
   const [customerClassification, setCustomerClassification] = useState(urlCustomerClassification);
@@ -70,7 +77,7 @@ export default function CompaniesPage() {
       // 회사 목록과 통계를 병렬로 로드
       const [companiesData, statsData] = await Promise.all([
         companyApi.getCompanies(filters, page),
-        companyApi.getCompanyStats()
+        companyApi.getCompanyStats(search || undefined)
       ])
       
       setCompanies(companiesData.results)
@@ -137,6 +144,24 @@ export default function CompaniesPage() {
     if (value && value !== "전체") {
       params.set("customer_classification", value);
     } else {
+      params.delete("customer_classification");
+    }
+    router.replace(`/companies?${params.toString()}`);
+  };
+
+  // 통계 카드 클릭 핸들러
+  const handleCardClick = (classification: string | null) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("page", "1");
+    // 현재 검색어는 유지
+    if (searchTerm) {
+      params.set("search", searchTerm);
+    }
+    // 고객구분 필터 설정
+    if (classification) {
+      params.set("customer_classification", classification);
+    } else {
+      // "총 등록 회사" 카드 클릭 시 고객구분 필터 제거
       params.delete("customer_classification");
     }
     router.replace(`/companies?${params.toString()}`);
@@ -232,77 +257,118 @@ export default function CompaniesPage() {
         )}
       </div>
 
-      <TooltipProvider>
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Card className="cursor-help">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">총 등록 회사</CardTitle>
-                  <Building2 className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{stats.total}개사</div>
-                </CardContent>
-              </Card>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>전체 등록된 회사 수</p>
-            </TooltipContent>
-          </Tooltip>
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+        <Card 
+          className="cursor-pointer hover:bg-muted/50 transition-colors"
+          onClick={() => handleCardClick(null)}
+        >
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">총 등록 회사</CardTitle>
+            <Building2 className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {stats.total}개
+              {searchTerm && stats.filteredTotal !== undefined && (
+                <>
+                  <br />
+                  <span className="text-blue-600">검색결과: {stats.filteredTotal}개</span>
+                </>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">전체 등록된 회사 수</p>
+          </CardContent>
+        </Card>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Card className="cursor-help">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">잠재 거래처</CardTitle>
-                  <Badge className="h-4 w-4 bg-yellow-400 text-yellow-950 border-yellow-500" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{stats.potentialCustomers}개사</div>
-                </CardContent>
-              </Card>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>SAP 거래처 등록 전, 컨택 업체</p>
-            </TooltipContent>
-          </Tooltip>
+        <Card 
+          className="cursor-pointer hover:bg-muted/50 transition-colors"
+          onClick={() => handleCardClick('잠재')}
+        >
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">잠재 거래처</CardTitle>
+            <Badge className="h-4 w-4 bg-yellow-400 text-yellow-950 border-yellow-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {stats.potentialCustomers}개
+              {searchTerm && stats.filteredPotentialCustomers !== undefined && (
+                <>
+                  <br />
+                  <span className="text-blue-600">검색결과: {stats.filteredPotentialCustomers}개</span>
+                </>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">SAP 거래처 등록 전, 컨택 업체</p>
+          </CardContent>
+        </Card>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Card className="cursor-help">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">신규 거래처</CardTitle>
-                  <Badge className="h-4 w-4 bg-blue-500 text-white border-blue-600" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{stats.newCustomers}개사</div>
-                </CardContent>
-              </Card>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>SAP 거래처 등록일 기준 3개월 이내 업체</p>
-            </TooltipContent>
-          </Tooltip>
+        <Card 
+          className="cursor-pointer hover:bg-muted/50 transition-colors"
+          onClick={() => handleCardClick('신규')}
+        >
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">신규 거래처</CardTitle>
+            <Badge className="h-4 w-4 bg-blue-500 text-white border-blue-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {stats.newCustomers}개
+              {searchTerm && stats.filteredNewCustomers !== undefined && (
+                <>
+                  <br />
+                  <span className="text-blue-600">검색결과: {stats.filteredNewCustomers}개</span>
+                </>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">SAP 등록일 기준 3개월 이내 업체</p>
+          </CardContent>
+        </Card>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Card className="cursor-help">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">기존 거래처</CardTitle>
-                  <Badge variant="secondary" className="h-4 w-4 bg-white text-gray-900 border-2 border-gray-400" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{stats.existingCustomers}개사</div>
-                </CardContent>
-              </Card>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>SAP 등록 거래처</p>
-            </TooltipContent>
-          </Tooltip>
-        </div>
-      </TooltipProvider>
+        <Card 
+          className="cursor-pointer hover:bg-muted/50 transition-colors"
+          onClick={() => handleCardClick('기존')}
+        >
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">기존 거래처</CardTitle>
+            <Badge variant="secondary" className="h-4 w-4 bg-white text-gray-900 border-2 border-gray-400" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {stats.existingCustomers}개
+              {searchTerm && stats.filteredExistingCustomers !== undefined && (
+                <>
+                  <br />
+                  <span className="text-blue-600">검색결과: {stats.filteredExistingCustomers}개</span>
+                </>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">SAP 등록일 기준 3개월 초과 업체</p>
+          </CardContent>
+        </Card>
+
+        <Card 
+          className="cursor-pointer hover:bg-muted/50 transition-colors"
+          onClick={() => handleCardClick('이탈')}
+        >
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">이탈 거래처</CardTitle>
+            <Badge className="h-4 w-4 bg-red-500 text-white border-red-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {stats.churnedCustomers}개
+              {searchTerm && stats.filteredChurnedCustomers !== undefined && (
+                <>
+                  <br />
+                  <span className="text-blue-600">검색결과: {stats.filteredChurnedCustomers}개</span>
+                </>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">마지막 거래일 3개월 초과 업체</p>
+            <p className="text-xs text-muted-foreground">(SAP 등록 후 미거래 업체 포함)</p>
+          </CardContent>
+        </Card>
+      </div>
 
       <Card>
         <CardHeader>

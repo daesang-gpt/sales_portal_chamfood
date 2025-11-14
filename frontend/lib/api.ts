@@ -333,8 +333,13 @@ export const companyApi = {
   },
 
   // 회사 통계 조회
-  getCompanyStats: async (): Promise<CompanyStats> => {
-    return apiCall<CompanyStats>('/stats/companies/');
+  getCompanyStats: async (search?: string): Promise<CompanyStats> => {
+    const params = new URLSearchParams();
+    if (search) {
+      params.append('search', search);
+    }
+    const queryString = params.toString() ? `?${params.toString()}` : '';
+    return apiCall<CompanyStats>(`/stats/companies/${queryString}`);
   },
 
   // 회사 자동 등록 (회사명만으로)
@@ -428,6 +433,32 @@ export const companyApi = {
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'CSV 업로드에 실패했습니다.');
+    }
+    
+    return response.json();
+  },
+
+  uploadCompaniesSapTsv: async (file: File): Promise<{
+    message: string;
+    created_count: number;
+    updated_count: number;
+    errors: string[];
+  }> => {
+    const token = localStorage.getItem('access_token');
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    const response = await fetch(`${API_BASE_URL}/import/companies-sap/`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: formData,
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'SAP 거래처 TSV 업로드에 실패했습니다.');
     }
     
     return response.json();
