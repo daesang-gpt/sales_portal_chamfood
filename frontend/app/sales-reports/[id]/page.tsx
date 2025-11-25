@@ -90,7 +90,7 @@ export default function SalesReportDetailPage() {
         console.log('영업일지 리스트 조회:', { companyId: companyCode });
         const data = await salesReportApi.getReports({
           companyId: companyCode,
-          ordering: "-visitDate",
+          ordering: "-visitDate,-createdAt",
           page_size: 100, // 충분히 크게 받아서 10개만 보여줌
         })
         if (process.env.NODE_ENV === 'development') {

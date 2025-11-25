@@ -51,7 +51,7 @@ export default function SalesReportsPage() {
         page_size: 10,
         search: search.trim() ? search : undefined,
         period: periodValue,
-        ordering: "-visitDate",
+        ordering: "-visitDate,-createdAt",
       });
       setReports(data.results);
       setTotalCount(data.count);

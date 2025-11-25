@@ -749,7 +749,7 @@ function CompanySalesReportList({ companyId }: { companyId: string }) {
         console.log('회사 영업일지 리스트 조회:', { companyId });
         const data = await salesReportApi.getReports({
           companyId,
-          ordering: "-visitDate",
+          ordering: "-visitDate,-createdAt",
           page_size: 100,
         });
         console.log('회사 영업일지 리스트 응답:', data);

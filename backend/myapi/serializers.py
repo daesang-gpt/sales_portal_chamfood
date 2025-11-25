@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Company, Report, User, CompanyFinancialStatus, SalesData
+from .models import Company, Report, User, CompanyFinancialStatus, SalesData, AuditLog
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 import datetime
 
@@ -431,4 +431,18 @@ class SalesDataSerializer(serializers.ModelSerializer):
             '이관재고여부', '담당자', '매입단가', '매입금액', '지점명', '매출비고', 
             '매입비고', '이력번호', 'BL번호', 'created_at'
         ] 
+        read_only_fields = ['id', 'created_at']
+
+class AuditLogSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(source='user.username', read_only=True)
+    target_username = serializers.CharField(source='target_user.username', read_only=True)
+    action_type_display = serializers.CharField(source='get_action_type_display', read_only=True)
+    
+    class Meta:
+        model = AuditLog
+        fields = [
+            'id', 'user', 'username', 'action_type', 'action_type_display', 'description',
+            'ip_address', 'user_agent', 'target_user', 'target_username',
+            'old_value', 'new_value', 'resource_type', 'resource_id', 'created_at'
+        ]
         read_only_fields = ['id', 'created_at'] 

@@ -4,7 +4,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
-import { Home, FileText, Building2, BarChart3, Users, Settings, Package, LogIn, LogOut, Database } from "lucide-react"
+import { Home, FileText, Building2, BarChart3, Users, Settings, Package, LogIn, LogOut, Database, FileSearch } from "lucide-react"
 import { getUserFromToken, isAdmin, isAuthenticated, logout } from "@/lib/auth"
 
 interface NavigationItem {

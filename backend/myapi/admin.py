@@ -9,6 +9,7 @@ from django.http import Http404, HttpResponseRedirect
 from django.template.response import TemplateResponse
 from django.contrib.auth.hashers import make_password
 from .models import Company, Report, User, CompanyFinancialStatus
+from .signals import create_audit_log
 
 # Register your models here.
 
@@ -88,6 +89,15 @@ class UserAdmin(BaseUserAdmin):
         """
         사용자 저장 시 비밀번호 변경 처리
         """
+        # 권한 변경 감지
+        old_role = None
+        if change:
+            try:
+                old_user = User.objects.get(pk=obj.pk)
+                old_role = old_user.role
+            except User.DoesNotExist:
+                pass
+        
         # 새 비밀번호가 입력된 경우 처리
         if change and form.cleaned_data.get('new_password'):
             new_password = form.cleaned_data['new_password']
@@ -98,6 +108,18 @@ class UserAdmin(BaseUserAdmin):
         
         # Django가 자동으로 비밀번호를 해시하여 저장함
         super().save_model(request, obj, form, change)
+        
+        # 권한 변경 로그 기록
+        if change and old_role and old_role != obj.role:
+            create_audit_log(
+                user=request.user if request.user.is_authenticated else None,
+                action_type='permission_change',
+                description=f'사용자 {obj.username}의 권한이 {old_role}에서 {obj.role}로 변경되었습니다.',
+                request=request if request.user.is_authenticated else None,
+                target_user=obj,
+                old_value=old_role,
+                new_value=obj.role,
+            )
     
     def get_urls(self):
         """비밀번호 변경 URL 추가"""
@@ -241,4 +263,25 @@ class CompanyFinancialStatusAdmin(admin.ModelAdmin):
     company_id_display.short_description = 'Company ID'
 
 admin.site.register(Company)
-admin.site.register(Report)
+
+@admin.register(Report)
+class ReportAdmin(admin.ModelAdmin):
+    list_display = ['id', 'company_name', 'visitDate', 'author_name', 'author_department', 'type', 'sales_stage', 'createdAt']
+    list_filter = ['type', 'sales_stage', 'visitDate', 'createdAt', 'author_department']
+    search_fields = ['company_name', 'content', 'author_name', 'tags']
+    ordering = ['-visitDate', '-createdAt']
+    readonly_fields = ['createdAt']
+    date_hierarchy = 'visitDate'
+    list_per_page = 50
+    
+    fieldsets = (
+        ('기본 정보', {
+            'fields': ('author', 'author_name', 'author_department', 'visitDate', 'createdAt')
+        }),
+        ('회사 정보', {
+            'fields': ('company_code', 'company_name', 'company_city_district')
+        }),
+        ('영업 정보', {
+            'fields': ('sales_stage', 'type', 'products', 'content', 'tags')
+        }),
+    )

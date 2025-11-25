@@ -1,6 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import CompanyViewSet, ReportViewSet, login_view, register_view, forgot_password_view, change_password_view, company_stats_view, company_suggest_view, auto_create_company, extract_keywords_view, SalesReportListView, CompanyFinancialStatusViewSet, SalesDataViewSet, download_reports_csv, download_companies_csv, upload_reports_csv, upload_companies_csv, upload_companies_sap_tsv, upload_sales_data_csv, dashboard_stats_view, dashboard_charts_data_view, get_company_sales_data, get_company_unique_products, users_list_view
+from .views import CompanyViewSet, ReportViewSet, login_view, register_view, forgot_password_view, change_password_view, company_stats_view, company_suggest_view, auto_create_company, extract_keywords_view, SalesReportListView, CompanyFinancialStatusViewSet, SalesDataViewSet, download_reports_csv, download_companies_csv, upload_reports_csv, upload_companies_csv, upload_companies_sap_tsv, upload_sales_data_csv, dashboard_stats_view, dashboard_charts_data_view, get_company_sales_data, get_company_unique_products, users_list_view, audit_logs_list_view
 from rest_framework_simplejwt.views import TokenObtainPairView
 
 router = DefaultRouter()
@@ -11,6 +11,7 @@ router.register(r'sales-data', SalesDataViewSet)
 
 urlpatterns = [
     path('users/', users_list_view, name='users-list'),
+    path('audit-logs/', audit_logs_list_view, name='audit-logs-list'),
     path('stats/companies/', company_stats_view, name='company-stats'),
     path('stats/dashboard/', dashboard_stats_view, name='dashboard-stats'),
     path('charts/dashboard/', dashboard_charts_data_view, name='dashboard-charts'),

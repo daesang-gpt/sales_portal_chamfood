@@ -206,11 +206,16 @@ export default function AdminPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>로그</CardTitle>
-              <CardDescription>시스템 로그를 확인합니다.</CardDescription>
+              <CardTitle>접속 기록 및 권한 변경 로그</CardTitle>
+              <CardDescription>시스템 접속 및 권한 변경 이력을 조회합니다.</CardDescription>
             </CardHeader>
             <CardContent>
-              <Button className="w-full">로그 보기</Button>
+              <Button 
+                className="w-full"
+                onClick={() => router.push('/admin/audit-logs')}
+              >
+                로그 조회
+              </Button>
             </CardContent>
           </Card>
 

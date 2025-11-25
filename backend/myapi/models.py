@@ -308,3 +308,40 @@ class SalesData(models.Model):
 
     def __str__(self):
         return f"{self.거래처명} - {self.매출일자} ({self.매출금액:,}원)"
+
+class AuditLog(models.Model):
+    """접속 기록 및 권한 변경 로그 모델"""
+    ACTION_TYPE_CHOICES = [
+        ('login', '로그인'),
+        ('logout', '로그아웃'),
+        ('permission_change', '권한 변경'),
+        ('personal_info_access', '개인정보 접근'),
+        ('download', '다운로드'),
+    ]
+    
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='audit_logs', verbose_name='사용자')
+    username = models.CharField(max_length=50, blank=True, null=True, verbose_name='사용자명')
+    action_type = models.CharField(max_length=50, choices=ACTION_TYPE_CHOICES, verbose_name='액션 타입')
+    description = models.TextField(blank=True, null=True, verbose_name='설명')
+    ip_address = models.GenericIPAddressField(null=True, blank=True, verbose_name='IP 주소')
+    user_agent = models.CharField(max_length=500, blank=True, null=True, verbose_name='User Agent')
+    target_user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='targeted_audit_logs', verbose_name='대상 사용자')
+    old_value = models.CharField(max_length=200, blank=True, null=True, verbose_name='이전 값')
+    new_value = models.CharField(max_length=200, blank=True, null=True, verbose_name='새 값')
+    resource_type = models.CharField(max_length=100, blank=True, null=True, verbose_name='리소스 타입')
+    resource_id = models.CharField(max_length=100, blank=True, null=True, verbose_name='리소스 ID')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='생성일시', db_index=True)
+    
+    class Meta:
+        db_table = 'audit_logs'
+        verbose_name = '감사 로그'
+        verbose_name_plural = '감사 로그들'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['-created_at']),
+            models.Index(fields=['user', '-created_at']),
+            models.Index(fields=['action_type', '-created_at']),
+        ]
+    
+    def __str__(self):
+        return f"{self.get_action_type_display()} - {self.username or 'Unknown'} - {self.created_at}"

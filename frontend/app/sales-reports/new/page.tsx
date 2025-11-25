@@ -180,8 +180,16 @@ export default function NewSalesReportPage() {
       }
 
       // date는 이미 위에서 검증되었으므로 non-null assertion 사용
+      // 로컬 날짜를 YYYY-MM-DD 형식으로 변환 (타임존 문제 방지)
+      const formatLocalDate = (date: Date): string => {
+        const year = date.getFullYear()
+        const month = String(date.getMonth() + 1).padStart(2, '0')
+        const day = String(date.getDate()).padStart(2, '0')
+        return `${year}-${month}-${day}`
+      }
+      
       const reportData: CreateSalesReportData = {
-        visitDate: date!.toISOString().split('T')[0], // YYYY-MM-DD 형식
+        visitDate: formatLocalDate(date!), // YYYY-MM-DD 형식 (로컬 날짜 사용)
         company: formData.company,
         company_obj: companyCode || null, // backend expects company_code (string) as PK
         sales_stage: formData.sales_stage || null,

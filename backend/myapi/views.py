@@ -8,8 +8,8 @@ from django.db.models import Q, Max, Sum, Value
 from django.db.models.functions import Replace
 from django.utils import timezone
 from datetime import timedelta, datetime, date
-from .models import Company, Report, User, CompanyFinancialStatus, SalesData
-from .serializers import CompanySerializer, ReportSerializer, UserSerializer, LoginSerializer, RegisterSerializer, CompanyFinancialStatusSerializer, SalesDataSerializer, ForgotPasswordSerializer, ChangePasswordSerializer
+from .models import Company, Report, User, CompanyFinancialStatus, SalesData, AuditLog
+from .serializers import CompanySerializer, ReportSerializer, UserSerializer, LoginSerializer, RegisterSerializer, CompanyFinancialStatusSerializer, SalesDataSerializer, ForgotPasswordSerializer, ChangePasswordSerializer, AuditLogSerializer
 from keybert import KeyBERT
 from sentence_transformers import SentenceTransformer, util
 import numpy as np
@@ -30,6 +30,7 @@ import secrets
 import traceback
 import string
 from django.db import connection
+from .signals import create_audit_log
 
 # 태그 후보 및 임베딩 캐싱
 TAG_CANDIDATES = None
@@ -449,8 +450,8 @@ class ReportViewSet(viewsets.ModelViewSet):
         # author만 select_related로 미리 로드 (company_code는 serializer에서 필요 시 로드)
         queryset = Report.objects.select_related('author').all()
         
-        # 방문일자 기준으로 내림차순 정렬 (최신순) + 회사명으로 추가 정렬 (일관된 정렬 보장)
-        return queryset.order_by('-visitDate', 'company_name')
+        # 방문일자 기준으로 내림차순 정렬 (최신순) + 작성일시로 추가 정렬 (일관된 정렬 보장)
+        return queryset.order_by('-visitDate', '-createdAt')
 
     def perform_create(self, serializer):
         # 현재 사용자를 author로 설정하고 작성자명, 팀명 저장
@@ -1724,22 +1725,22 @@ class SalesReportListView(ListAPIView):
             # 검색/필터/정렬
             search = self.request.query_params.get('search', '').strip()
             period = self.request.query_params.get('period', 'all')
-            ordering = self.request.query_params.get('ordering', '-visitDate')
+            ordering = self.request.query_params.get('ordering', '-visitDate,-createdAt')
             company_id = self.request.query_params.get('companyId', '').strip()
             
-            # 동일한 방문일자일 때 일관된 정렬을 위해 회사명을 추가 정렬 기준으로 사용
-            # ordering이 방문일자만 포함하는 경우 회사명을 추가
+            # 동일한 방문일자일 때 일관된 정렬을 위해 작성일시를 추가 정렬 기준으로 사용
+            # ordering이 방문일자만 포함하는 경우 작성일시를 추가
             if ordering and ordering.strip():
                 ordering_parts = [o.strip() for o in ordering.split(',')]
-                # 방문일자 관련 정렬만 있고 회사명 정렬이 없는 경우 추가
+                # 방문일자 관련 정렬만 있고 작성일시 정렬이 없는 경우 추가
                 has_visit_date = any('visitDate' in part or 'visit_date' in part for part in ordering_parts)
-                has_company_name = any('company_name' in part for part in ordering_parts)
-                if has_visit_date and not has_company_name:
-                    # 방문일자 정렬에 회사명을 추가 정렬 기준으로 추가
-                    ordering = f"{ordering},company_name"
+                has_created_at = any('createdAt' in part or 'created_at' in part for part in ordering_parts)
+                if has_visit_date and not has_created_at:
+                    # 방문일자 정렬에 작성일시를 추가 정렬 기준으로 추가
+                    ordering = f"{ordering},-createdAt"
             else:
-                # 기본 정렬: 방문일자 내림차순 + 회사명 오름차순
-                ordering = '-visitDate,company_name'
+                # 기본 정렬: 방문일자 내림차순 + 작성일시 내림차순
+                ordering = '-visitDate,-createdAt'
 
             if company_id:
                 # company_code FK는 to_field='company_code'로 설정되어 있으므로 직접 비교 가능
@@ -1806,9 +1807,9 @@ class SalesReportListView(ListAPIView):
                     queryset = queryset.order_by(ordering)
             except Exception as e:
                 print(f"[SalesReportListView] order_by 실패, 기본 정렬 사용: {str(e)}")
-                # 기본 정렬로 폴백: 방문일자 내림차순 + 회사명 오름차순
+                # 기본 정렬로 폴백: 방문일자 내림차순 + 작성일시 내림차순
                 try:
-                    queryset = queryset.order_by('-visitDate', 'company_name')
+                    queryset = queryset.order_by('-visitDate', '-createdAt')
                 except Exception as e2:
                     print(f"[SalesReportListView] 기본 정렬도 실패: {str(e2)}")
                     # 최후의 수단: 방문일자만
@@ -2062,6 +2063,15 @@ def download_reports_csv(request):
         
         logging.info(f'영업일지 CSV 다운로드 완료: {row_count}개 행 처리됨')
         
+        # 다운로드 로그 기록
+        create_audit_log(
+            user=request.user,
+            action_type='download',
+            description=f'영업일지 CSV 다운로드 ({row_count}개 행)',
+            request=request,
+            resource_type='reports',
+        )
+        
         return response
         
     except Exception as e:
@@ -2136,6 +2146,16 @@ def download_companies_csv(request):
                 company.transaction_start_date.strftime('%Y-%m-%d') if company.transaction_start_date else '',
                 company.payment_terms or '',
             ])
+        
+        # 다운로드 로그 기록
+        company_count = companies.count()
+        create_audit_log(
+            user=request.user,
+            action_type='download',
+            description=f'회사 데이터 CSV 다운로드 ({company_count}개 회사)',
+            request=request,
+            resource_type='companies',
+        )
         
         return response
         
@@ -3971,10 +3991,82 @@ def users_list_view(request):
     try:
         users = User.objects.all().order_by('id')
         serializer = UserSerializer(users, many=True)
+        
+        # 개인정보 접근 로그 기록
+        create_audit_log(
+            user=request.user,
+            action_type='personal_info_access',
+            description=f'사용자 목록 조회 ({users.count()}명)',
+            request=request,
+            resource_type='users',
+        )
+        
         return Response(serializer.data, status=status.HTTP_200_OK)
     except Exception as e:
         return Response({
             'error': f'사용자 목록 조회 중 오류가 발생했습니다: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def audit_logs_list_view(request):
+    """감사 로그 목록을 반환하는 API (관리자 전용)"""
+    try:
+        # 관리자 권한 확인
+        if not is_admin_user(request.user):
+            return Response({
+                'error': '관리자만 접근할 수 있습니다.'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        # 쿼리 파라미터 처리
+        action_type = request.query_params.get('action_type', None)
+        user_id = request.query_params.get('user_id', None)
+        start_date = request.query_params.get('start_date', None)
+        end_date = request.query_params.get('end_date', None)
+        page = int(request.query_params.get('page', 1))
+        page_size = int(request.query_params.get('page_size', 50))
+        
+        # 기본 쿼리셋
+        queryset = AuditLog.objects.all().select_related('user', 'target_user').order_by('-created_at')
+        
+        # 필터링
+        if action_type:
+            queryset = queryset.filter(action_type=action_type)
+        if user_id:
+            queryset = queryset.filter(user_id=user_id)
+        if start_date:
+            try:
+                start_datetime = datetime.strptime(start_date, '%Y-%m-%d')
+                queryset = queryset.filter(created_at__gte=start_datetime)
+            except ValueError:
+                pass
+        if end_date:
+            try:
+                end_datetime = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
+                queryset = queryset.filter(created_at__lt=end_datetime)
+            except ValueError:
+                pass
+        
+        # 페이지네이션
+        total_count = queryset.count()
+        start_index = (page - 1) * page_size
+        end_index = start_index + page_size
+        logs = queryset[start_index:end_index]
+        
+        serializer = AuditLogSerializer(logs, many=True)
+        
+        return Response({
+            'results': serializer.data,
+            'count': total_count,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': (total_count + page_size - 1) // page_size,
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        logging.error(f"Audit logs list view error: {str(e)}")
+        logging.error(traceback.format_exc())
+        return Response({
+            'error': f'로그 조회 중 오류가 발생했습니다: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 def debug_all_fields(row_num, label, params, original_map):
