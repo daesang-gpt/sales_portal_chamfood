@@ -13,27 +13,62 @@
 
 ## 사용 방법
 
-### 방법 1: 자동 백업 및 다운로드 (권장)
+### 방법 1: PowerShell에서 실행 (Windows)
 
-프로젝트 루트 디렉토리에서 PowerShell 스크립트를 실행합니다:
+프로젝트 루트 디렉토리에서 PowerShell을 열고 실행:
 
 ```powershell
 .\download_production_db.ps1
 ```
 
-이 스크립트는 다음 작업을 수행합니다:
-1. 운영 서버에 SSH 접속
-2. 서버에서 `backup_db.sh` 실행하여 DB 백업 생성
-3. 생성된 백업 파일을 로컬 `db_dumps/` 디렉토리로 다운로드
-4. 압축 파일인 경우 자동으로 압축 해제
-
-### 방법 2: 기존 백업 파일만 다운로드
-
-서버에 이미 백업 파일이 있는 경우, 백업을 다시 실행하지 않고 기존 파일만 다운로드:
-
+기존 백업 파일만 다운로드:
 ```powershell
 .\download_production_db.ps1 -SkipBackup
 ```
+
+특정 파일명 지정:
+```powershell
+.\download_production_db.ps1 -FileName "db_dump_20251201_103420.json.gz"
+```
+
+### 방법 2: Bash에서 실행 (Git Bash, WSL, Linux, macOS)
+
+프로젝트 루트 디렉토리에서 실행:
+
+```bash
+# 실행 권한 부여 (처음 한 번만)
+chmod +x download_production_db.sh
+
+# 스크립트 실행
+./download_production_db.sh
+```
+
+기존 백업 파일만 다운로드:
+```bash
+./download_production_db.sh --skip-backup
+```
+
+### 방법 3: 특정 파일명 지정하여 다운로드
+
+특정 백업 파일을 다운로드하려면 파일명을 지정:
+
+**PowerShell:**
+```powershell
+.\download_production_db.ps1 -FileName "db_dump_20251201_103420.json.gz"
+```
+
+**Bash:**
+```bash
+./download_production_db.sh --file db_dump_20251201_103420.json.gz
+```
+
+### 스크립트 동작
+
+이 스크립트는 다음 작업을 수행합니다:
+1. 운영 서버에 SSH 접속
+2. 서버에서 `backup_db.sh` 실행하여 DB 백업 생성 (--skip-backup 옵션 없을 때)
+3. 생성된 백업 파일을 로컬 `db_dumps/` 디렉토리로 다운로드
+4. 압축 파일인 경우 자동으로 압축 해제
 
 ## 다운로드된 파일 위치
 

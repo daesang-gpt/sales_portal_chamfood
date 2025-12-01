@@ -7,7 +7,8 @@
 # 3. 서버에 backup_db.sh 스크립트가 있어야 함
 
 param(
-    [switch]$SkipBackup  # 기존 백업 파일만 다운로드
+    [switch]$SkipBackup,  # 기존 백업 파일만 다운로드
+    [string]$FileName = ""  # 특정 파일명 지정 (예: db_dump_20251201_103420.json.gz)
 )
 
 Write-Host "========================================" -ForegroundColor Cyan
@@ -30,7 +31,25 @@ if (-not (Test-Path $LOCAL_DOWNLOAD_DIR)) {
 
 $backupFile = ""
 
-if (-not $SkipBackup) {
+# 특정 파일명이 지정된 경우
+if ($FileName -ne "") {
+    $backupFile = "$BACKUP_DIR/$FileName"
+    Write-Host "[1/4] 지정된 파일 다운로드: $FileName" -ForegroundColor Yellow
+    
+    # 파일 존재 확인
+    $checkCommand = "test -f `"$backupFile`" && echo 'FILE_EXISTS' || echo 'FILE_NOT_FOUND'"
+    $checkResult = ssh "${SERVER_USER}@${SERVER_IP}" $checkCommand 2>&1
+    
+    if ($checkResult -notmatch "FILE_EXISTS") {
+        Write-Host "❌ 지정된 파일을 찾을 수 없습니다: $backupFile" -ForegroundColor Red
+        Write-Host "서버의 백업 파일 목록을 확인하세요:" -ForegroundColor Yellow
+        ssh "${SERVER_USER}@${SERVER_IP}" "ls -lh $BACKUP_DIR/" 2>&1
+        exit 1
+    }
+    
+    Write-Host "✅ 파일 확인 완료: $backupFile" -ForegroundColor Green
+    Write-Host ""
+} elseif (-not $SkipBackup) {
     Write-Host "[1/4] 운영 서버에서 DB 백업 실행 중..." -ForegroundColor Yellow
     
     # SSH로 서버에 접속하여 백업 실행
@@ -139,9 +158,14 @@ fi
 }
 
 # 파일명 추출
-$fileName = Split-Path $backupFile -Leaf
+if ($FileName -ne "") {
+    $fileName = $FileName
+} else {
+    $fileName = Split-Path $backupFile -Leaf
+}
 
-Write-Host "[2/4] 백업 파일 다운로드 중..." -ForegroundColor Yellow
+$stepNum = if ($FileName -ne "") { "[2/4]" } else { "[2/4]" }
+Write-Host "$stepNum 백업 파일 다운로드 중..." -ForegroundColor Yellow
 Write-Host "원본: ${SERVER_USER}@${SERVER_IP}:$backupFile" -ForegroundColor Gray
 Write-Host "대상: $LOCAL_DOWNLOAD_DIR\$fileName" -ForegroundColor Gray
 
