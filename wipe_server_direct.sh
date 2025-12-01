@@ -1,14 +1,11 @@
 #!/bin/bash
 
-# ⚠️⚠️⚠️ 경고: 운영 서버 완전 삭제 스크립트 ⚠️⚠️⚠️
-# 이 스크립트는 운영 서버의 모든 데이터와 파일을 완전히 삭제합니다.
-# 되돌릴 수 없으므로 신중하게 사용하세요!
+# ⚠️⚠️⚠️ 경고: 운영 서버 완전 삭제 스크립트 (서버에서 직접 실행) ⚠️⚠️⚠️
+# 이 스크립트는 서버에서 직접 실행해야 합니다.
+# 사용법: 서버에 SSH 접속 후 이 스크립트를 실행하세요.
 
 set -e
 
-# 서버 정보
-SERVER_IP="192.168.99.37"
-SERVER_USER="adm1003701"
 PROJECT_ROOT="/opt/sales-portal"
 
 echo "========================================"
@@ -48,17 +45,6 @@ echo "서버 삭제 시작..."
 echo "========================================"
 echo ""
 
-# SSH로 서버에 접속하여 삭제 실행
-# root 계정으로 접속하여 sudo 없이 실행
-echo "서버에 접속하여 삭제를 진행합니다..."
-echo "root 비밀번호를 입력하세요: dsit_459037&"
-echo ""
-
-ssh "${SERVER_USER}@${SERVER_IP}" <<'ENDSSH'
-set -e
-
-PROJECT_ROOT="/opt/sales-portal"
-
 echo "[1/6] 실행 중인 프로세스 확인 및 중지..."
 
 # Backend 프로세스 중지
@@ -91,16 +77,16 @@ fi
 echo "✅ Cron 작업 제거 완료"
 echo ""
 
-echo "[3/6] root 권한으로 전환하여 삭제 진행..."
-# root로 전환하여 sudo 없이 실행
-su - root <<'ROOTSCRIPT'
-set -e
-PROJECT_ROOT="/opt/sales-portal"
-
 echo "[3/6] 프로젝트 디렉토리 삭제..."
 if [ -d "$PROJECT_ROOT" ]; then
     echo "  삭제 중: $PROJECT_ROOT"
-    rm -rf "$PROJECT_ROOT"
+    # root 권한이 필요한 경우
+    if [ -w "$(dirname "$PROJECT_ROOT")" ]; then
+        rm -rf "$PROJECT_ROOT"
+    else
+        echo "  root 권한이 필요합니다. 비밀번호를 입력하세요:"
+        sudo rm -rf "$PROJECT_ROOT"
+    fi
     echo "✅ 프로젝트 디렉토리 삭제 완료"
 else
     echo "⚠️  프로젝트 디렉토리가 없습니다: $PROJECT_ROOT"
@@ -110,7 +96,11 @@ echo ""
 echo "[4/6] 로그 디렉토리 확인 및 삭제..."
 if [ -d "/opt/sales-portal/logs" ]; then
     echo "  삭제 중: /opt/sales-portal/logs"
-    rm -rf /opt/sales-portal/logs
+    if [ -w "/opt" ]; then
+        rm -rf /opt/sales-portal/logs
+    else
+        sudo rm -rf /opt/sales-portal/logs
+    fi
     echo "✅ 로그 디렉토리 삭제 완료"
 fi
 echo ""
@@ -118,7 +108,11 @@ echo ""
 echo "[5/6] 백업 디렉토리 확인 및 삭제..."
 if [ -d "/opt/sales-portal/db_dumps" ]; then
     echo "  삭제 중: /opt/sales-portal/db_dumps"
-    rm -rf /opt/sales-portal/db_dumps
+    if [ -w "/opt" ]; then
+        rm -rf /opt/sales-portal/db_dumps
+    else
+        sudo rm -rf /opt/sales-portal/db_dumps
+    fi
     echo "✅ 백업 디렉토리 삭제 완료"
 fi
 echo ""
@@ -129,7 +123,11 @@ if [ -d "/opt/sales-portal" ]; then
     echo "⚠️  남은 파일이 있습니다:"
     ls -la /opt/sales-portal/ 2>/dev/null || true
     echo "  강제 삭제 중..."
-    rm -rf /opt/sales-portal
+    if [ -w "/opt" ]; then
+        rm -rf /opt/sales-portal
+    else
+        sudo rm -rf /opt/sales-portal
+    fi
 fi
 
 # 프로세스 재확인
@@ -142,41 +140,23 @@ echo ""
 echo "========================================"
 echo "✅ 서버 파일 삭제 완료"
 echo "========================================"
-ROOTSCRIPT
-ENDSSH
+echo ""
 
-if [ $? -eq 0 ]; then
+read -p "데이터베이스 데이터도 삭제하시겠습니까? (yes/no): " DELETE_DB
+if [ "$DELETE_DB" = "yes" ]; then
     echo ""
-    echo "========================================"
-    echo "✅ 운영 서버 삭제 완료!"
-    echo "========================================"
-    echo ""
-    echo "삭제된 항목:"
-    echo "  - 프로젝트 디렉토리: $PROJECT_ROOT"
-    echo "  - 모든 백업 파일"
-    echo "  - 모든 로그 파일"
-    echo "  - 실행 중인 프로세스"
-    echo ""
-    echo "⚠️  데이터베이스 데이터는 별도로 삭제해야 합니다."
-    echo ""
-    read -p "데이터베이스 데이터도 삭제하시겠습니까? (yes/no): " DELETE_DB
-    if [ "$DELETE_DB" = "yes" ]; then
-        echo ""
-        echo "데이터베이스 삭제를 진행합니다..."
-        ssh "${SERVER_USER}@${SERVER_IP}" <<'ENDDB'
-# Oracle DB 데이터 삭제
-export ORACLE_HOME=/u01/app/oracle/product/19c/db_1
-export PATH=$ORACLE_HOME/bin:$PATH
-export ORACLE_SID=XEPDB1
-
-# SQL*Plus로 접속하여 모든 테이블 삭제
-sqlplus -s salesportal/salesportal123 <<SQL
+    echo "데이터베이스 삭제를 진행합니다..."
+    
+    export ORACLE_HOME=/u01/app/oracle/product/19c/db_1
+    export PATH=$ORACLE_HOME/bin:$PATH
+    export ORACLE_SID=XEPDB1
+    
+    sqlplus -s salesportal/salesportal123 <<SQL
 SET PAGESIZE 0
 SET FEEDBACK OFF
 SET HEADING OFF
 SET ECHO OFF
 
--- 모든 테이블 삭제
 BEGIN
   FOR cur_rec IN (SELECT object_name, object_type FROM user_objects WHERE object_type = 'TABLE') LOOP
     BEGIN
@@ -188,7 +168,6 @@ BEGIN
 END;
 /
 
--- 모든 시퀀스 삭제
 BEGIN
   FOR cur_rec IN (SELECT object_name FROM user_objects WHERE object_type = 'SEQUENCE') LOOP
     BEGIN
@@ -200,7 +179,6 @@ BEGIN
 END;
 /
 
--- 모든 뷰 삭제
 BEGIN
   FOR cur_rec IN (SELECT object_name FROM user_objects WHERE object_type = 'VIEW') LOOP
     BEGIN
@@ -215,13 +193,7 @@ END;
 EXIT;
 SQL
 
-echo "✅ 데이터베이스 데이터 삭제 완료"
-ENDDB
-    fi
-else
-    echo ""
-    echo "❌ 서버 삭제 중 오류가 발생했습니다."
-    exit 1
+    echo "✅ 데이터베이스 데이터 삭제 완료"
 fi
 
 echo ""
