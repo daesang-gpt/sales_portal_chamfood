@@ -29,8 +29,8 @@ export default function AdminPage() {
     setIsLoading(false);
   }, [router]);
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     router.push('/login');
   };
 
@@ -161,46 +161,6 @@ export default function AdminPage() {
               >
                 사용자 목록 보기
               </Button>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>회사 관리</CardTitle>
-              <CardDescription>등록된 회사 정보를 관리합니다.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button className="w-full">회사 목록 보기</Button>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>보고서 관리</CardTitle>
-              <CardDescription>판매 보고서를 확인하고 관리합니다.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button className="w-full">보고서 목록 보기</Button>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>통계</CardTitle>
-              <CardDescription>전체 통계 정보를 확인합니다.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button className="w-full">통계 보기</Button>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>시스템 설정</CardTitle>
-              <CardDescription>시스템 설정을 관리합니다.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button className="w-full">설정 관리</Button>
             </CardContent>
           </Card>
 

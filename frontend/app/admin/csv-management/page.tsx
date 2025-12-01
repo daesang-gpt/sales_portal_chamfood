@@ -6,12 +6,12 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Download, Upload, AlertCircle, CheckCircle, Loader2 } from "lucide-react"
-import { companyApi } from "@/lib/api"
+import { companyApi, prospectCompanyApi } from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
 import { getUserFromToken, isAdmin } from "@/lib/auth"
 
 export default function CsvManagementPage() {
-  const [loading, setLoading] = useState<'reports-download' | 'companies-download' | 'reports-upload' | 'companies-upload' | null>(null)
+  const [loading, setLoading] = useState<'reports-download' | 'companies-download' | 'prospect-companies-download' | 'reports-upload' | 'companies-upload' | 'prospect-companies-upload' | null>(null)
   const [errors, setErrors] = useState<string[]>([])
   const [successMessage, setSuccessMessage] = useState('')
   const { toast } = useToast()
@@ -19,21 +19,35 @@ export default function CsvManagementPage() {
   const currentUser = getUserFromToken()
   const isAdminUser = isAdmin()
 
-  const handleDownload = async (type: 'reports' | 'companies') => {
+  const handleDownload = async (type: 'reports' | 'companies' | 'prospect-companies') => {
     try {
-      setLoading(type === 'reports' ? 'reports-download' : 'companies-download')
+      setLoading(type === 'reports' ? 'reports-download' : type === 'companies' ? 'companies-download' : 'prospect-companies-download')
       setErrors([])
       setSuccessMessage('')
 
-      const blob = type === 'reports' 
-        ? await companyApi.downloadReportsCsv() 
-        : await companyApi.downloadCompaniesCsv()
+      let blob: Blob
+      let filename: string
+      let description: string
+
+      if (type === 'reports') {
+        blob = await companyApi.downloadReportsCsv()
+        filename = '영업일지_백업.csv'
+        description = "영업일지 데이터를 다운로드했습니다."
+      } else if (type === 'companies') {
+        blob = await companyApi.downloadCompaniesCsv()
+        filename = '회사_백업.csv'
+        description = "회사 데이터를 다운로드했습니다."
+      } else {
+        blob = await prospectCompanyApi.downloadProspectCompaniesCsv()
+        filename = '업체리스트_백업.csv'
+        description = "업체 리스트 데이터를 다운로드했습니다."
+      }
 
       // 파일 다운로드 (blob URL 생성 및 즉시 해제)
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = type === 'reports' ? '영업일지_백업.csv' : '회사_백업.csv'
+      a.download = filename
       a.style.display = 'none'
       document.body.appendChild(a)
       a.click()
@@ -46,7 +60,7 @@ export default function CsvManagementPage() {
 
       toast({
         title: "다운로드 완료",
-        description: type === 'reports' ? "영업일지 데이터를 다운로드했습니다." : "회사 데이터를 다운로드했습니다.",
+        description: description,
         variant: "default",
       })
 
@@ -62,15 +76,21 @@ export default function CsvManagementPage() {
     }
   }
 
-  const handleUpload = async (type: 'reports' | 'companies', file: File) => {
+  const handleUpload = async (type: 'reports' | 'companies' | 'prospect-companies', file: File) => {
     try {
-      setLoading(type === 'reports' ? 'reports-upload' : 'companies-upload')
+      setLoading(type === 'reports' ? 'reports-upload' : type === 'companies' ? 'companies-upload' : 'prospect-companies-upload')
       setErrors([])
       setSuccessMessage('')
 
-      const result = type === 'reports' 
-        ? await companyApi.uploadReportsCsv(file) 
-        : await companyApi.uploadCompaniesCsv(file)
+      let result: { message: string; errors?: string[] }
+
+      if (type === 'reports') {
+        result = await companyApi.uploadReportsCsv(file)
+      } else if (type === 'companies') {
+        result = await companyApi.uploadCompaniesCsv(file)
+      } else {
+        result = await prospectCompanyApi.uploadProspectCompaniesCsv(file)
+      }
 
       setSuccessMessage(result.message)
       setErrors(result.errors || [])
@@ -113,14 +133,14 @@ export default function CsvManagementPage() {
       <div>
         <h1 className="text-3xl font-bold">CSV 데이터 관리</h1>
         <p className="text-muted-foreground mt-2">
-          영업일지와 회사 데이터를 CSV/XLSX 파일로 일괄 다운로드하고 업로드할 수 있습니다.
+          영업일지, 회사 데이터, 업체 리스트를 CSV/XLSX 파일로 일괄 다운로드하고 업로드할 수 있습니다.
         </p>
         <p className="text-sm text-gray-500 mt-1">
           관리자: {currentUser?.name} ({currentUser?.department})
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* 영업일지 다운로드/업로드 */}
         <Card>
           <CardHeader>
@@ -230,6 +250,61 @@ export default function CsvManagementPage() {
             </div>
           </CardContent>
         </Card>
+
+        {/* 업체 리스트 다운로드/업로드 */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Upload className="h-5 w-5" />
+              업체 리스트
+            </CardTitle>
+            <CardDescription>
+              업체 리스트 데이터를 CSV/XLSX 파일로 다운로드하거나 수정 후 업로드할 수 있습니다.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Button 
+                onClick={() => handleDownload('prospect-companies')}
+                disabled={loading === 'prospect-companies-download'}
+                className="w-full"
+                variant="outline"
+              >
+                {loading === 'prospect-companies-download' ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="mr-2 h-4 w-4" />
+                )}
+                업체 리스트 다운로드
+              </Button>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="prospect-companies-upload">업체 리스트 업로드</Label>
+              <Input
+                id="prospect-companies-upload"
+                type="file"
+                accept=".csv,.xlsx"
+                disabled={loading === 'prospect-companies-upload'}
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) {
+                    handleUpload('prospect-companies', file)
+                  }
+                }}
+              />
+              <Button
+                disabled={loading === 'prospect-companies-upload'}
+                className="w-full"
+              >
+                {loading === 'prospect-companies-upload' && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                업체 리스트 업로드
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* 결과 메시지 */}
@@ -303,6 +378,23 @@ export default function CsvManagementPage() {
               • 회사코드가 이미 존재하면 업데이트, 없으면 새로 생성됩니다<br/>
               • 회사코드와 회사명은 필수 입력 항목입니다<br/>
               • 날짜 필드는 YYYY-MM-DD 형식이어야 합니다
+            </p>
+          </div>
+
+          <div>
+            <h4 className="font-medium mb-2">업체 리스트 파일 형식 (CSV/XLSX)</h4>
+            <p className="text-sm text-muted-foreground mb-2">
+              필수 컬럼: 업체명, 업종
+            </p>
+            <p className="text-sm text-muted-foreground mb-2">
+              선택 컬럼: ID, 인허가정보, 대표자, 소재지, 주요제품, 전화번호, 우선순위, 자사거래
+            </p>
+            <p className="text-sm text-muted-foreground">
+              • ID가 있으면 업데이트, 없으면 새로 생성됩니다<br/>
+              • 업체명과 업종은 필수 입력 항목입니다<br/>
+              • 업종은 "축산물 가공장", "식품 가공장", "도소매" 중 하나여야 합니다<br/>
+              • 우선순위는 "높음", "중간", "낮음" 중 하나여야 합니다<br/>
+              • 자사거래는 "거래중", "미거래" 중 하나여야 합니다
             </p>
           </div>
         </CardContent>

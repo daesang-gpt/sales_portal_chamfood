@@ -12,6 +12,8 @@ import type {
   CreateSalesReportData,
   UpdateSalesReportData,
   SalesReportParams,
+  ProspectCompany,
+  ProspectCompanyStats,
 } from '@/lib/types';
 
 // 환경에 따른 API URL 설정
@@ -601,5 +603,107 @@ export const dashboardApi = {
     }>;
   }> => {
     return apiCall('/charts/dashboard/');
+  },
+};
+
+// 업체 리스트 API
+export const prospectCompanyApi = {
+  // 업체 목록 조회 (업종별 필터링 지원)
+  getProspectCompanies: async (industry?: string, search?: string): Promise<ProspectCompany[]> => {
+    const params = new URLSearchParams();
+    if (industry) {
+      params.append('industry', industry);
+    }
+    if (search) {
+      params.append('search', search);
+    }
+    const queryString = params.toString() ? `?${params.toString()}` : '';
+    const response = await apiCall<ProspectCompany[] | PaginatedResponse<ProspectCompany>>(
+      `/prospect-companies/${queryString}`
+    );
+
+    if (Array.isArray(response)) {
+      return response;
+    }
+
+    if (response && Array.isArray(response.results)) {
+      return response.results;
+    }
+
+    console.warn('[API] 예상치 못한 업체 리스트 응답 형식:', response);
+    return [];
+  },
+
+  // 업체 상세 조회
+  getProspectCompany: (id: number): Promise<ProspectCompany> => {
+    return apiCall<ProspectCompany>(`/prospect-companies/${id}/`);
+  },
+
+  // 업체 생성
+  createProspectCompany: (data: Partial<ProspectCompany>): Promise<ProspectCompany> => {
+    return apiCall<ProspectCompany>('/prospect-companies/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // 업체 수정
+  updateProspectCompany: (id: number, data: Partial<ProspectCompany>): Promise<ProspectCompany> => {
+    return apiCall<ProspectCompany>(`/prospect-companies/${id}/`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // 업체 삭제
+  deleteProspectCompany: (id: number): Promise<void> => {
+    return apiCall<void>(`/prospect-companies/${id}/`, {
+      method: 'DELETE',
+    });
+  },
+
+  // 업종별 통계 조회
+  getProspectCompanyStats: (): Promise<ProspectCompanyStats> => {
+    return apiCall<ProspectCompanyStats>('/stats/prospect-companies/');
+  },
+
+  // CSV 다운로드
+  downloadProspectCompaniesCsv: async (): Promise<Blob> => {
+    const token = (typeof window !== 'undefined') ? localStorage.getItem('access_token') : null;
+    const response = await fetch(`${API_BASE_URL}/export/prospect-companies/`, {
+      method: 'GET',
+      headers: {
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: '다운로드 실패' }));
+      throw new Error(errorData.error || '다운로드 중 오류가 발생했습니다.');
+    }
+
+    return response.blob();
+  },
+
+  // CSV 업로드
+  uploadProspectCompaniesCsv: async (file: File): Promise<{ message: string; created_count: number; updated_count: number; errors?: string[] }> => {
+    const token = (typeof window !== 'undefined') ? localStorage.getItem('access_token') : null;
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch(`${API_BASE_URL}/import/prospect-companies/`, {
+      method: 'POST',
+      headers: {
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: '업로드 실패' }));
+      throw new Error(errorData.error || '업로드 중 오류가 발생했습니다.');
+    }
+
+    return response.json();
   },
 }; 

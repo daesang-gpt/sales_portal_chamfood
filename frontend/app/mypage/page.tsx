@@ -38,8 +38,8 @@ export default function MyPage() {
     setIsLoading(false);
   }, [router]);
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     router.push('/login');
   };
 

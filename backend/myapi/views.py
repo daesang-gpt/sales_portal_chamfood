@@ -3,13 +3,14 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.contrib.auth import authenticate
+from django.contrib.auth.models import update_last_login
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.db.models import Q, Max, Sum, Value
 from django.db.models.functions import Replace
 from django.utils import timezone
 from datetime import timedelta, datetime, date
-from .models import Company, Report, User, CompanyFinancialStatus, SalesData, AuditLog
-from .serializers import CompanySerializer, ReportSerializer, UserSerializer, LoginSerializer, RegisterSerializer, CompanyFinancialStatusSerializer, SalesDataSerializer, ForgotPasswordSerializer, ChangePasswordSerializer, AuditLogSerializer
+from .models import Company, Report, User, CompanyFinancialStatus, SalesData, AuditLog, ProspectCompany
+from .serializers import CompanySerializer, ReportSerializer, UserSerializer, LoginSerializer, RegisterSerializer, CompanyFinancialStatusSerializer, SalesDataSerializer, ForgotPasswordSerializer, ChangePasswordSerializer, AuditLogSerializer, ProspectCompanySerializer
 from keybert import KeyBERT
 from sentence_transformers import SentenceTransformer, util
 import numpy as np
@@ -321,123 +322,151 @@ class CompanyViewSet(viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         """회사 정보 수정 시 재무 정보도 함께 처리하고 고객 구분 자동 계산"""
         logger = logging.getLogger(__name__)
-        instance = self.get_object()
-        partial = kwargs.pop('partial', False)
         
-        # request.data를 dict로 복사 (QueryDict는 수정 불가)
-        data = dict(request.data)
-        
-        # 재무 정보 추출 (별도 처리)
-        financial_statuses = data.pop('financial_statuses', None)
-        
-        # 회사 정보 업데이트
-        serializer = self.get_serializer(instance, data=data, partial=partial)
-        serializer.is_valid(raise_exception=True)
-        self.perform_update(serializer)
-        
-        # 재무 정보 처리
-        if financial_statuses is not None:
-            from django.db import transaction
-            from datetime import datetime
+        try:
+            instance = self.get_object()
+            partial = kwargs.pop('partial', False)
             
-            try:
-                with transaction.atomic():
-                    # financial_statuses가 리스트인지 확인
-                    if not isinstance(financial_statuses, list):
-                        logger.warning(f"financial_statuses가 리스트가 아닙니다: {type(financial_statuses)}")
-                        financial_statuses = []
-                    
-                    # 기존 재무 정보 삭제 (제공된 재무 정보만 유지하기 위해)
-                    # financial_statuses가 빈 배열이면 모든 재무 정보 삭제
-                    # financial_statuses에 항목이 있으면 해당 항목만 유지하고 나머지 삭제
-                    
-                    # 유효한 fiscal_year 목록 수집
-                    valid_fiscal_years = []
-                    for financial_data in financial_statuses:
-                        if not isinstance(financial_data, dict):
-                            continue
-                        if not financial_data.get('fiscal_year'):
-                            continue
-                        
-                        try:
-                            fiscal_year_str = financial_data['fiscal_year']
-                            if isinstance(fiscal_year_str, str):
-                                # YYYY-MM-DD 형식 또는 YYYY 형식 처리
-                                if len(fiscal_year_str) == 4:
-                                    fiscal_year = datetime.strptime(fiscal_year_str + '-01-01', '%Y-%m-%d').date()
-                                else:
-                                    fiscal_year = datetime.strptime(fiscal_year_str.split('T')[0], '%Y-%m-%d').date()
-                            else:
-                                fiscal_year = fiscal_year_str
-                            valid_fiscal_years.append(fiscal_year)
-                        except Exception as e:
-                            logger.warning(f"fiscal_year 파싱 오류: {e}, financial_data: {financial_data}")
-                            continue
-                    
-                    # 기존 재무 정보 중 유효한 fiscal_year에 해당하지 않는 것들 삭제
-                    if valid_fiscal_years:
-                        # 유효한 fiscal_year에 해당하지 않는 재무 정보 삭제
-                        CompanyFinancialStatus.objects.filter(
-                            company=instance
-                        ).exclude(fiscal_year__in=valid_fiscal_years).delete()
-                    else:
-                        # valid_fiscal_years가 비어있으면 모든 재무 정보 삭제
-                        CompanyFinancialStatus.objects.filter(company=instance).delete()
-                    
-                    # 재무 정보 생성 또는 업데이트
-                    for financial_data in financial_statuses:
-                        if not isinstance(financial_data, dict):
-                            continue
-                        if not financial_data.get('fiscal_year'):
-                            continue
-                        
-                        try:
-                            # 날짜 파싱
-                            fiscal_year_str = financial_data['fiscal_year']
-                            if isinstance(fiscal_year_str, str):
-                                # YYYY-MM-DD 형식 또는 YYYY 형식 처리
-                                if len(fiscal_year_str) == 4:
-                                    fiscal_year = datetime.strptime(fiscal_year_str + '-01-01', '%Y-%m-%d').date()
-                                else:
-                                    fiscal_year = datetime.strptime(fiscal_year_str.split('T')[0], '%Y-%m-%d').date()
-                            else:
-                                fiscal_year = fiscal_year_str
-                            
-                            # 숫자 값 안전하게 변환
-                            def safe_int(value, default=0):
-                                if value is None or value == '':
-                                    return default
-                                try:
-                                    return int(float(str(value)))
-                                except (ValueError, TypeError):
-                                    return default
-                            
-                            # 재무 정보 생성 또는 업데이트
-                            CompanyFinancialStatus.objects.update_or_create(
-                                company=instance,
-                                fiscal_year=fiscal_year,
-                                defaults={
-                                    'total_assets': safe_int(financial_data.get('total_assets')),
-                                    'capital': safe_int(financial_data.get('capital')),
-                                    'total_equity': safe_int(financial_data.get('total_equity')),
-                                    'revenue': safe_int(financial_data.get('revenue')),
-                                    'operating_income': safe_int(financial_data.get('operating_income')),
-                                    'net_income': safe_int(financial_data.get('net_income')),
-                                }
-                            )
-                        except Exception as e:
-                            # 재무 정보 처리 오류는 로그에 남기고 계속 진행
-                            logger.error(f"재무 정보 처리 오류: {e}, financial_data: {financial_data}", exc_info=True)
-                            continue
-            except Exception as e:
-                # 재무 정보 처리 중 전체적인 오류 발생 시 로그에 남기고 계속 진행
-                logger.error(f"재무 정보 처리 중 전체 오류: {e}", exc_info=True)
-                # 회사 정보는 이미 업데이트되었으므로 계속 진행
+            # request.data를 안전하게 dict로 복사
+            # JSON 요청의 경우 request.data는 이미 dict이지만, QueryDict인 경우도 처리
+            import copy
+            if isinstance(request.data, dict):
+                # 이미 dict인 경우 깊은 복사
+                data = copy.deepcopy(dict(request.data))
+            else:
+                # QueryDict인 경우 dict로 변환
+                data = dict(request.data)
+            
+            # 재무 정보 추출 (별도 처리) - 리스트가 제대로 추출되도록 처리
+            financial_statuses = None
+            if 'financial_statuses' in data:
+                financial_statuses = data.pop('financial_statuses')
+                # 리스트가 아닌 경우 처리
+                if not isinstance(financial_statuses, list):
+                    if financial_statuses is not None:
+                        logger.warning(f"financial_statuses가 리스트가 아닙니다: {type(financial_statuses)}, 값: {financial_statuses}")
+                    financial_statuses = []
+            
+            logger.debug(f"회사 수정 시작 - company_code: {instance.company_code}, financial_statuses 개수: {len(financial_statuses) if financial_statuses else 0}")
+            
+            # 회사 정보 업데이트
+            serializer = self.get_serializer(instance, data=data, partial=partial)
+            serializer.is_valid(raise_exception=True)
+            self.perform_update(serializer)
         
-        if getattr(instance, '_prefetched_objects_cache', None):
-            instance._prefetched_objects_cache = {}
-        
-        return Response(serializer.data)
+            # 재무 정보 처리
+            if financial_statuses is not None:
+                from django.db import transaction
+                from datetime import datetime
+                
+                try:
+                    with transaction.atomic():
+                        # financial_statuses가 리스트인지 확인
+                        if not isinstance(financial_statuses, list):
+                            logger.warning(f"financial_statuses가 리스트가 아닙니다: {type(financial_statuses)}")
+                            financial_statuses = []
+                        
+                        # 기존 재무 정보 삭제 (제공된 재무 정보만 유지하기 위해)
+                        # financial_statuses가 빈 배열이면 모든 재무 정보 삭제
+                        # financial_statuses에 항목이 있으면 해당 항목만 유지하고 나머지 삭제
+                        
+                        # 유효한 fiscal_year 목록 수집
+                        valid_fiscal_years = []
+                        for financial_data in financial_statuses:
+                            if not isinstance(financial_data, dict):
+                                continue
+                            if not financial_data.get('fiscal_year'):
+                                continue
+                            
+                            try:
+                                fiscal_year_str = financial_data['fiscal_year']
+                                if isinstance(fiscal_year_str, str):
+                                    # YYYY-MM-DD 형식 또는 YYYY 형식 처리
+                                    if len(fiscal_year_str) == 4:
+                                        fiscal_year = datetime.strptime(fiscal_year_str + '-01-01', '%Y-%m-%d').date()
+                                    else:
+                                        fiscal_year = datetime.strptime(fiscal_year_str.split('T')[0], '%Y-%m-%d').date()
+                                else:
+                                    fiscal_year = fiscal_year_str
+                                valid_fiscal_years.append(fiscal_year)
+                            except Exception as e:
+                                logger.warning(f"fiscal_year 파싱 오류: {e}, financial_data: {financial_data}")
+                                continue
+                        
+                        # 기존 재무 정보 중 유효한 fiscal_year에 해당하지 않는 것들 삭제
+                        if valid_fiscal_years:
+                            # 유효한 fiscal_year에 해당하지 않는 재무 정보 삭제
+                            CompanyFinancialStatus.objects.filter(
+                                company=instance
+                            ).exclude(fiscal_year__in=valid_fiscal_years).delete()
+                        else:
+                            # valid_fiscal_years가 비어있으면 모든 재무 정보 삭제
+                            CompanyFinancialStatus.objects.filter(company=instance).delete()
+                        
+                        # 재무 정보 생성 또는 업데이트
+                        for financial_data in financial_statuses:
+                            if not isinstance(financial_data, dict):
+                                continue
+                            if not financial_data.get('fiscal_year'):
+                                continue
+                            
+                            try:
+                                # 날짜 파싱
+                                fiscal_year_str = financial_data['fiscal_year']
+                                if isinstance(fiscal_year_str, str):
+                                    # YYYY-MM-DD 형식 또는 YYYY 형식 처리
+                                    if len(fiscal_year_str) == 4:
+                                        fiscal_year = datetime.strptime(fiscal_year_str + '-01-01', '%Y-%m-%d').date()
+                                    else:
+                                        fiscal_year = datetime.strptime(fiscal_year_str.split('T')[0], '%Y-%m-%d').date()
+                                else:
+                                    fiscal_year = fiscal_year_str
+                                
+                                # 숫자 값 안전하게 변환
+                                def safe_int(value, default=0):
+                                    if value is None or value == '':
+                                        return default
+                                    try:
+                                        return int(float(str(value)))
+                                    except (ValueError, TypeError):
+                                        return default
+                                
+                                # 재무 정보 생성 또는 업데이트
+                                CompanyFinancialStatus.objects.update_or_create(
+                                    company=instance,
+                                    fiscal_year=fiscal_year,
+                                    defaults={
+                                        'total_assets': safe_int(financial_data.get('total_assets')),
+                                        'capital': safe_int(financial_data.get('capital')),
+                                        'total_equity': safe_int(financial_data.get('total_equity')),
+                                        'revenue': safe_int(financial_data.get('revenue')),
+                                        'operating_income': safe_int(financial_data.get('operating_income')),
+                                        'net_income': safe_int(financial_data.get('net_income')),
+                                    }
+                                )
+                            except Exception as e:
+                                # 재무 정보 처리 오류는 로그에 남기고 계속 진행
+                                logger.error(f"재무 정보 처리 오류: {e}, financial_data: {financial_data}", exc_info=True)
+                                continue
+                except Exception as e:
+                    # 재무 정보 처리 중 전체적인 오류 발생 시 로그에 남기고 계속 진행
+                    logger.error(f"재무 정보 처리 중 전체 오류: {e}", exc_info=True)
+                    # 회사 정보는 이미 업데이트되었으므로 계속 진행
+            
+            if getattr(instance, '_prefetched_objects_cache', None):
+                instance._prefetched_objects_cache = {}
+            
+            logger.debug(f"회사 수정 완료 - company_code: {instance.company_code}")
+            return Response(serializer.data)
+            
+        except Exception as e:
+            logger.error(f"회사 수정 중 오류 발생: {str(e)}", exc_info=True)
+            logger.error(f"요청 데이터: {request.data}")
+            logger.error(f"트레이스백: {traceback.format_exc()}")
+            return Response(
+                {'error': f'회사 정보 수정 중 오류가 발생했습니다: {str(e)}'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 class ReportViewSet(viewsets.ModelViewSet):
     queryset = Report.objects.all()  # type: ignore[attr-defined]
@@ -794,7 +823,17 @@ def login_view(request):
             user = authenticate(request, username=id, password=password)
             
             if user is not None:
+                update_last_login(None, user)
                 refresh = RefreshToken.for_user(user)
+                
+                create_audit_log(
+                    user=user,
+                    action_type='login',
+                    description='JWT 로그인 성공',
+                    request=request,
+                    resource_type='auth',
+                    resource_id=str(user.id),
+                )
                 
                 # 최초 로그인 여부 확인
                 requires_password_change = not getattr(user, 'is_password_changed', False)
@@ -831,6 +870,32 @@ def login_view(request):
         return Response({
             'success': False,
             'message': '서버 오류가 발생했습니다.',
+            'error': str(e) if settings.DEBUG else None
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def logout_view(request):
+    try:
+        create_audit_log(
+            user=request.user,
+            action_type='logout',
+            description='JWT 로그아웃',
+            request=request,
+            resource_type='auth',
+            resource_id=str(request.user.id),
+        )
+        return Response({
+            'success': True,
+            'message': '로그아웃되었습니다.'
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        logging.error(f"Logout view error: {str(e)}")
+        logging.error(traceback.format_exc())
+        return Response({
+            'success': False,
+            'message': '로그아웃 처리 중 오류가 발생했습니다.',
             'error': str(e) if settings.DEBUG else None
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -1908,6 +1973,60 @@ class SalesDataViewSet(viewsets.ModelViewSet):
             
         return queryset.order_by('-매출일자')
 
+class ProspectCompanyViewSet(viewsets.ModelViewSet):
+    queryset = ProspectCompany.objects.all()
+    serializer_class = ProspectCompanySerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        queryset = ProspectCompany.objects.all()
+        
+        # 업종별 필터링
+        industry = self.request.query_params.get('industry', None)
+        if industry:
+            queryset = queryset.filter(industry=industry)
+        
+        # 검색 기능 (업체명, 소재지)
+        search = self.request.query_params.get('search', None)
+        if search:
+            queryset = queryset.filter(
+                Q(company_name__icontains=search) |
+                Q(location__icontains=search)
+            )
+        
+        return queryset.order_by('-created_at')
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def prospect_company_stats_view(request):
+    """업종별 통계 조회"""
+    try:
+        stats = {}
+        industries = ['축산물 가공장', '식품 가공장', '도소매']
+        
+        for industry in industries:
+            total = ProspectCompany.objects.filter(industry=industry).count()
+            our_customers = ProspectCompany.objects.filter(
+                industry=industry,
+                has_transaction='거래중'
+            ).count()
+            ratio = round((our_customers / total * 100) if total > 0 else 0, 1)
+            
+            stats[industry] = {
+                'total': total,
+                'ourCustomers': our_customers,
+                'ratio': ratio
+            }
+        
+        return Response(stats)
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"업체 통계 조회 중 오류: {e}", exc_info=True)
+        return Response(
+            {'error': str(e), 'detail': '통계 조회 중 오류가 발생했습니다.'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def download_reports_csv(request):
@@ -2447,6 +2566,201 @@ def upload_companies_csv(request):
         
     except Exception as e:
         logging.error(f'회사 CSV 업로드 오류: {e}')
+        return Response({'error': '업로드 중 오류가 발생했습니다.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def download_prospect_companies_csv(request):
+    """업체 리스트 데이터를 CSV로 다운로드"""
+    try:
+        # 관리자 권한 확인
+        if not has_global_view_access(request.user):
+            return Response({'error': '관리자 또는 뷰어만 다운로드할 수 있습니다.'}, status=status.HTTP_403_FORBIDDEN)
+        
+        # 모든 업체 리스트 데이터 조회
+        prospect_companies = ProspectCompany.objects.all().order_by('-created_at')
+        
+        # CSV 응답 생성
+        response = HttpResponse(content_type='text/csv; charset=utf-8-sig')
+        response['Content-Disposition'] = 'attachment; filename="업체리스트_백업.csv"'
+        
+        writer = csv.writer(response)
+        
+        # 헤더 작성
+        writer.writerow([
+            'ID', '인허가정보', '업체명', '업종', '대표자', '소재지', '주요제품',
+            '전화번호', '우선순위', '자사거래', '생성일시', '수정일시'
+        ])
+        
+        # 데이터 작성
+        for prospect in prospect_companies:
+            writer.writerow([
+                prospect.id or '',
+                prospect.license_number or '',
+                prospect.company_name or '',
+                prospect.industry or '',
+                prospect.ceo_name or '',
+                prospect.location or '',
+                prospect.main_products or '',
+                prospect.phone or '',
+                prospect.priority or '',
+                prospect.has_transaction or '',
+                prospect.created_at.strftime('%Y-%m-%d %H:%M:%S') if prospect.created_at else '',
+                prospect.updated_at.strftime('%Y-%m-%d %H:%M:%S') if prospect.updated_at else '',
+            ])
+        
+        # 다운로드 로그 기록
+        company_count = prospect_companies.count()
+        create_audit_log(
+            user=request.user,
+            action_type='download',
+            description=f'업체 리스트 CSV 다운로드 ({company_count}개 업체)',
+            request=request,
+            resource_type='prospect_companies',
+        )
+        
+        return response
+        
+    except Exception as e:
+        logging.error(f'업체 리스트 CSV 다운로드 오류: {e}')
+        return Response({'error': '다운로드 중 오류가 발생했습니다.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def upload_prospect_companies_csv(request):
+    """업체 리스트 CSV 파일을 업로드하여 일괄 업데이트/생성"""
+    try:
+        # 관리자 권한 확인
+        if not hasattr(request.user, 'role') or request.user.role != 'admin':
+            return Response({'error': '관리자만 업로드할 수 있습니다.'}, status=status.HTTP_403_FORBIDDEN)
+        
+        if 'file' not in request.FILES:
+            return Response({'error': '파일이 필요합니다.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        csv_file = request.FILES['file']
+        
+        # 파일 확장자 확인 및 읽기
+        file_extension = csv_file.name.lower().split('.')[-1]
+        if file_extension not in ['csv', 'xlsx']:
+            return Response({'error': 'CSV 또는 XLSX 파일만 업로드 가능합니다.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            if file_extension == 'csv':
+                df = pd.read_csv(csv_file, encoding='utf-8')
+            else:  # xlsx
+                df = pd.read_excel(BytesIO(csv_file.read()))
+        except Exception as e:
+            return Response({'error': f'파일 읽기 오류: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # 필요한 컬럼 확인 (필수: 업체명, 업종)
+        required_columns = ['업체명', '업종']
+        if not all(col in df.columns for col in required_columns):
+            return Response({'error': '파일에 필수 컬럼(업체명, 업종)이 없습니다.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        updated_count = 0
+        created_count = 0
+        errors = []
+        
+        def safe_get_value(row, col_name, default=None):
+            """안전하게 컬럼 값 가져오기 (빈 문자열은 None으로 변환)"""
+            try:
+                value = row.get(col_name, default)
+                if pd.isna(value) or (isinstance(value, str) and value.strip() == ''):
+                    return default
+                return str(value).strip() if value is not None else default
+            except Exception:
+                return default
+        
+        # 업종 유효성 검사
+        valid_industries = ['축산물 가공장', '식품 가공장', '도소매']
+        valid_priorities = ['높음', '중간', '낮음']
+        valid_transactions = ['거래중', '미거래']
+        
+        for index, row in df.iterrows():
+            try:
+                company_name = safe_get_value(row, '업체명')
+                industry = safe_get_value(row, '업종')
+                
+                if not company_name or not industry:
+                    errors.append(f"행 {index + 2}: 업체명과 업종은 필수입니다.")
+                    continue
+                
+                # 업종 유효성 검사
+                if industry not in valid_industries:
+                    errors.append(f"행 {index + 2}: 업종은 {', '.join(valid_industries)} 중 하나여야 합니다.")
+                    continue
+                
+                # 우선순위 유효성 검사
+                priority = safe_get_value(row, '우선순위')
+                if priority and priority not in valid_priorities:
+                    errors.append(f"행 {index + 2}: 우선순위는 {', '.join(valid_priorities)} 중 하나여야 합니다.")
+                    continue
+                
+                # 자사거래 유효성 검사
+                has_transaction = safe_get_value(row, '자사거래')
+                if has_transaction and has_transaction not in valid_transactions:
+                    errors.append(f"행 {index + 2}: 자사거래는 {', '.join(valid_transactions)} 중 하나여야 합니다.")
+                    continue
+                
+                # ID가 있으면 업데이트, 없으면 생성
+                prospect_id = safe_get_value(row, 'ID')
+                if prospect_id and prospect_id.isdigit():
+                    # 기존 업체 업데이트
+                    try:
+                        prospect = ProspectCompany.objects.get(id=int(prospect_id))
+                        prospect.license_number = safe_get_value(row, '인허가정보')
+                        prospect.company_name = company_name
+                        prospect.industry = industry
+                        prospect.ceo_name = safe_get_value(row, '대표자')
+                        prospect.location = safe_get_value(row, '소재지')
+                        prospect.main_products = safe_get_value(row, '주요제품')
+                        prospect.phone = safe_get_value(row, '전화번호')
+                        prospect.priority = priority if priority in valid_priorities else None
+                        prospect.has_transaction = has_transaction if has_transaction in valid_transactions else None
+                        prospect.save()
+                        updated_count += 1
+                    except ProspectCompany.DoesNotExist:
+                        # ID가 있지만 존재하지 않으면 새로 생성
+                        ProspectCompany.objects.create(
+                            license_number=safe_get_value(row, '인허가정보'),
+                            company_name=company_name,
+                            industry=industry,
+                            ceo_name=safe_get_value(row, '대표자'),
+                            location=safe_get_value(row, '소재지'),
+                            main_products=safe_get_value(row, '주요제품'),
+                            phone=safe_get_value(row, '전화번호'),
+                            priority=priority if priority in valid_priorities else None,
+                            has_transaction=has_transaction if has_transaction in valid_transactions else None,
+                        )
+                        created_count += 1
+                else:
+                    # 새로 생성
+                    ProspectCompany.objects.create(
+                        license_number=safe_get_value(row, '인허가정보'),
+                        company_name=company_name,
+                        industry=industry,
+                        ceo_name=safe_get_value(row, '대표자'),
+                        location=safe_get_value(row, '소재지'),
+                        main_products=safe_get_value(row, '주요제품'),
+                        phone=safe_get_value(row, '전화번호'),
+                        priority=priority if priority in valid_priorities else None,
+                        has_transaction=has_transaction if has_transaction in valid_transactions else None,
+                    )
+                    created_count += 1
+                    
+            except Exception as e:
+                errors.append(f"행 {index + 2}: {str(e)}")
+                continue
+        
+        return Response({
+            'message': f'업체 리스트 업로드 완료: {created_count}개 생성, {updated_count}개 업데이트',
+            'created_count': created_count,
+            'updated_count': updated_count,
+            'errors': errors[:10]  # 최대 10개 오류만 반환
+        })
+        
+    except Exception as e:
+        logging.error(f'업체 리스트 CSV 업로드 오류: {e}')
         return Response({'error': '업로드 중 오류가 발생했습니다.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['POST'])

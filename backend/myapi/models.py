@@ -345,3 +345,59 @@ class AuditLog(models.Model):
     
     def __str__(self):
         return f"{self.get_action_type_display()} - {self.username or 'Unknown'} - {self.created_at}"
+
+class ProspectCompany(models.Model):
+    """업체 리스트 모델"""
+    INDUSTRY_CHOICES = [
+        ('축산물 가공장', '축산물 가공장'),
+        ('식품 가공장', '식품 가공장'),
+        ('도소매', '도소매'),
+    ]
+    
+    PRIORITY_CHOICES = [
+        ('높음', '높음'),
+        ('중간', '중간'),
+        ('낮음', '낮음'),
+    ]
+    
+    TRANSACTION_STATUS_CHOICES = [
+        ('거래중', '거래중'),
+        ('미거래', '미거래'),
+    ]
+    
+    license_number = models.CharField(max_length=100, blank=True, null=True, verbose_name='인허가정보')
+    company_name = models.CharField(max_length=200, verbose_name='업체명')
+    industry = models.CharField(
+        max_length=50,
+        choices=INDUSTRY_CHOICES,
+        verbose_name='업종'
+    )
+    ceo_name = models.CharField(max_length=100, blank=True, null=True, verbose_name='대표자')
+    location = models.CharField(max_length=500, blank=True, null=True, verbose_name='소재지')
+    main_products = models.TextField(blank=True, null=True, verbose_name='주요제품')
+    phone = models.CharField(max_length=20, blank=True, null=True, verbose_name='전화번호')
+    priority = models.CharField(
+        max_length=10,
+        choices=PRIORITY_CHOICES,
+        blank=True,
+        null=True,
+        verbose_name='우선순위'
+    )
+    has_transaction = models.CharField(
+        max_length=10,
+        choices=TRANSACTION_STATUS_CHOICES,
+        blank=True,
+        null=True,
+        verbose_name='자사거래'
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='생성일시')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='수정일시')
+    
+    class Meta:
+        db_table = 'prospect_companies'
+        verbose_name = '업체 리스트'
+        verbose_name_plural = '업체 리스트들'
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return self.company_name or 'Unknown Prospect Company'

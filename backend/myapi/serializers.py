@@ -1,5 +1,6 @@
+from django.core.validators import validate_ipv46_address
 from rest_framework import serializers
-from .models import Company, Report, User, CompanyFinancialStatus, SalesData, AuditLog
+from .models import Company, Report, User, CompanyFinancialStatus, SalesData, AuditLog, ProspectCompany
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 import datetime
 
@@ -433,10 +434,34 @@ class SalesDataSerializer(serializers.ModelSerializer):
         ] 
         read_only_fields = ['id', 'created_at']
 
+class SafeIPAddressField(serializers.CharField):
+    """Django 3.2 + DRF 조합에서 IP 필드 직렬화/역직렬화 시 발생하는 호환성 문제를 해결한다."""
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault('allow_blank', True)
+        kwargs.setdefault('allow_null', True)
+        super().__init__(*args, **kwargs)
+
+    def to_representation(self, value):
+        return value or None
+
+    def to_internal_value(self, data):
+        value = super().to_internal_value(data)
+        if not value:
+            return value
+        try:
+            validate_ipv46_address(value)
+        except Exception:
+            raise serializers.ValidationError('유효한 IP 주소를 입력하세요.')
+        return value
+
+
 class AuditLogSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source='user.username', read_only=True)
     target_username = serializers.CharField(source='target_user.username', read_only=True)
     action_type_display = serializers.CharField(source='get_action_type_display', read_only=True)
+    # Django 3.2 + DRF 조합에서 GenericIPAddressField 사용 시 unpack 오류가 발생하므로
+    # 직접 정의한 SafeIPAddressField로 대체해 검증과 직렬화를 모두 안전하게 처리한다.
+    ip_address = SafeIPAddressField(read_only=True)
     
     class Meta:
         model = AuditLog
@@ -445,4 +470,14 @@ class AuditLogSerializer(serializers.ModelSerializer):
             'ip_address', 'user_agent', 'target_user', 'target_username',
             'old_value', 'new_value', 'resource_type', 'resource_id', 'created_at'
         ]
-        read_only_fields = ['id', 'created_at'] 
+        read_only_fields = ['id', 'created_at']
+
+class ProspectCompanySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProspectCompany
+        fields = [
+            'id', 'license_number', 'company_name', 'industry', 'ceo_name',
+            'location', 'main_products', 'phone', 'priority', 'has_transaction',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at'] 

@@ -183,12 +183,11 @@ export default function AuditLogsPage() {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div>
                 <label className="text-sm font-medium mb-2 block">액션 타입</label>
-                <Select value={actionTypeFilter} onValueChange={setActionTypeFilter}>
+                <Select value={actionTypeFilter || undefined} onValueChange={(value) => setActionTypeFilter(value || '')}>
                   <SelectTrigger>
                     <SelectValue placeholder="전체" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">전체</SelectItem>
                     {Object.entries(ACTION_TYPE_LABELS).map(([value, label]) => (
                       <SelectItem key={value} value={value}>
                         {label}

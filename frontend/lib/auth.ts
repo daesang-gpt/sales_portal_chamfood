@@ -1,4 +1,5 @@
 import { jwtDecode } from 'jwt-decode';
+import { getApiBaseUrl } from './api';
 
 type UserRole = 'admin' | 'user' | 'viewer';
 
@@ -89,8 +90,24 @@ export const hasWritePermission = (): boolean => {
 };
 
 // 로그아웃
-export const logout = (): void => {
+export const logout = async (): Promise<void> => {
   if (typeof window === 'undefined') return;
+  
+  const token = localStorage.getItem('access_token');
+  if (token) {
+    try {
+      const apiBaseUrl = getApiBaseUrl();
+      await fetch(`${apiBaseUrl}/logout/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      });
+    } catch (error) {
+      console.error('로그아웃 기록 중 오류가 발생했습니다.', error);
+    }
+  }
   
   localStorage.removeItem('access_token');
   localStorage.removeItem('refresh_token');

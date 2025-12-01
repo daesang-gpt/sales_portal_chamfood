@@ -1,104 +1,64 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Search, Plus, Eye, Building2, Phone, MapPin } from "lucide-react"
+import { Search, Plus, Building2, Phone, MapPin, ExternalLink, Loader2 } from "lucide-react"
 import Link from "next/link"
+import { prospectCompanyApi, ProspectCompany, ProspectCompanyStats } from "@/lib/api"
 
-const prospects = {
-  가공장: [
-    {
-      id: 1,
-      name: "대한육가공",
-      location: "경기도 안양시",
-      contact: "031-123-4567",
-      products: "소시지, 햄류",
-      status: "미접촉",
-      priority: "높음",
-      hasOurCustomer: false,
-    },
-    {
-      id: 2,
-      name: "프리미엄미트",
-      location: "충남 천안시",
-      contact: "041-987-6543",
-      products: "정육, 가공육",
-      status: "연락완료",
-      priority: "중간",
-      hasOurCustomer: true,
-    },
-  ],
-  프랜차이즈: [
-    {
-      id: 3,
-      name: "맛있는치킨",
-      location: "서울시 강남구",
-      contact: "02-555-1234",
-      products: "치킨, 닭고기",
-      status: "미접촉",
-      priority: "높음",
-      hasOurCustomer: false,
-    },
-    {
-      id: 4,
-      name: "한우마을",
-      location: "부산시 해운대구",
-      contact: "051-777-8888",
-      products: "한우, 소고기",
-      status: "협의중",
-      priority: "높음",
-      hasOurCustomer: true,
-    },
-  ],
-  도소매: [
-    {
-      id: 5,
-      name: "신선마트",
-      location: "대구시 중구",
-      contact: "053-222-3333",
-      products: "정육, 냉동육",
-      status: "미접촉",
-      priority: "낮음",
-      hasOurCustomer: false,
-    },
-  ],
-}
+const industryMap = {
+  "축산물 가공장": "축산물 가공장",
+  "식품 가공장": "식품 가공장",
+  "도소매": "도소매",
+} as const
 
-const industryStats = {
-  가공장: { total: 150, ourCustomers: 45, ratio: 30 },
-  프랜차이즈: { total: 280, ourCustomers: 84, ratio: 30 },
-  도소매: { total: 520, ourCustomers: 104, ratio: 20 },
-}
+type IndustryType = keyof typeof industryMap
 
 export default function ProspectsPage() {
   const [searchTerm, setSearchTerm] = useState("")
-  const [activeTab, setActiveTab] = useState("가공장")
+  const [activeTab, setActiveTab] = useState<IndustryType>("축산물 가공장")
+  const [prospects, setProspects] = useState<ProspectCompany[]>([])
+  const [stats, setStats] = useState<ProspectCompanyStats>({})
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  const filteredProspects = prospects[activeTab as keyof typeof prospects].filter(
-    (prospect) =>
-      prospect.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      prospect.location.toLowerCase().includes(searchTerm.toLowerCase()),
-  )
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "미접촉":
-        return "secondary"
-      case "연락완료":
-        return "default"
-      case "협의중":
-        return "destructive"
-      default:
-        return "secondary"
+  // 통계 데이터 로드
+  useEffect(() => {
+    const loadStats = async () => {
+      try {
+        const statsData = await prospectCompanyApi.getProspectCompanyStats()
+        setStats(statsData)
+      } catch (err) {
+        console.error('통계 데이터 로드 오류:', err)
+      }
     }
-  }
+    loadStats()
+  }, [])
 
-  const getPriorityColor = (priority: string) => {
+  // 업체 목록 로드
+  useEffect(() => {
+    const loadProspects = async () => {
+      try {
+        setLoading(true)
+        setError(null)
+        const data = await prospectCompanyApi.getProspectCompanies(activeTab, searchTerm)
+        setProspects(data)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : '데이터를 불러오는 중 오류가 발생했습니다.')
+        console.error('업체 목록 로드 오류:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    loadProspects()
+  }, [activeTab, searchTerm])
+
+  const getPriorityColor = (priority?: string) => {
     switch (priority) {
       case "높음":
         return "destructive"
@@ -109,6 +69,11 @@ export default function ProspectsPage() {
       default:
         return "secondary"
     }
+  }
+
+  const handleNaverMapClick = (companyName: string) => {
+    const url = `https://map.naver.com/p/search/${encodeURIComponent(companyName)}`
+    window.open(url, '_blank')
   }
 
   return (
@@ -125,23 +90,26 @@ export default function ProspectsPage() {
 
       {/* 업계별 통계 */}
       <div className="grid gap-4 md:grid-cols-3">
-        {Object.entries(industryStats).map(([industry, stats]) => (
-          <Card key={industry}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">{industry}</CardTitle>
-              <Building2 className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats.total}개사</div>
-              <div className="flex items-center space-x-2 text-xs text-muted-foreground">
-                <span>자사 거래: {stats.ourCustomers}개사</span>
-                <Badge variant="outline" className="text-xs">
-                  {stats.ratio}%
-                </Badge>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+        {Object.entries(industryMap).map(([industryKey, industryValue]) => {
+          const industryStats = stats[industryValue] || { total: 0, ourCustomers: 0, ratio: 0 }
+          return (
+            <Card key={industryKey}>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">{industryKey}</CardTitle>
+                <Building2 className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{industryStats.total}개사</div>
+                <div className="flex items-center space-x-2 text-xs text-muted-foreground">
+                  <span>자사 거래: {industryStats.ourCustomers}개사</span>
+                  <Badge variant="outline" className="text-xs">
+                    {industryStats.ratio}%
+                  </Badge>
+                </div>
+              </CardContent>
+            </Card>
+          )
+        })}
       </div>
 
       <Card>
@@ -162,75 +130,90 @@ export default function ProspectsPage() {
             </div>
           </div>
 
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as IndustryType)}>
             <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="가공장">가공장</TabsTrigger>
-              <TabsTrigger value="프랜차이즈">프랜차이즈</TabsTrigger>
+              <TabsTrigger value="축산물 가공장">축산물 가공장</TabsTrigger>
+              <TabsTrigger value="식품 가공장">식품 가공장</TabsTrigger>
               <TabsTrigger value="도소매">도소매</TabsTrigger>
             </TabsList>
 
-            {Object.entries(prospects).map(([category, categoryProspects]) => (
-              <TabsContent key={category} value={category}>
+            <TabsContent value={activeTab}>
+              {loading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  <span className="ml-2 text-muted-foreground">로딩 중...</span>
+                </div>
+              ) : error ? (
+                <div className="text-center py-8 text-red-600">{error}</div>
+              ) : prospects.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">데이터가 없습니다.</div>
+              ) : (
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>업체명</TableHead>
                       <TableHead>소재지</TableHead>
-                      <TableHead>연락처</TableHead>
+                      <TableHead>전화번호</TableHead>
                       <TableHead>주요제품</TableHead>
-                      <TableHead>영업상태</TableHead>
                       <TableHead>우선순위</TableHead>
                       <TableHead>자사거래</TableHead>
                       <TableHead>작업</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredProspects.map((prospect) => (
+                    {prospects.map((prospect) => (
                       <TableRow key={prospect.id}>
-                        <TableCell className="font-medium">{prospect.name}</TableCell>
+                        <TableCell className="font-medium">{prospect.company_name}</TableCell>
                         <TableCell>
                           <div className="flex items-center space-x-1">
                             <MapPin className="h-3 w-3" />
-                            <span className="text-sm">{prospect.location}</span>
+                            <span className="text-sm">{prospect.location || '-'}</span>
                           </div>
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center space-x-1">
                             <Phone className="h-3 w-3" />
-                            <span className="text-sm">{prospect.contact}</span>
+                            <span className="text-sm">{prospect.phone || '-'}</span>
                           </div>
                         </TableCell>
-                        <TableCell>{prospect.products}</TableCell>
+                        <TableCell>{prospect.main_products || '-'}</TableCell>
                         <TableCell>
-                          <Badge variant={getStatusColor(prospect.status)}>{prospect.status}</Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={getPriorityColor(prospect.priority)}>{prospect.priority}</Badge>
-                        </TableCell>
-                        <TableCell>
-                          {prospect.hasOurCustomer ? (
-                            <Badge variant="outline" className="text-green-600">
-                              거래중
+                          {prospect.priority ? (
+                            <Badge variant={getPriorityColor(prospect.priority)}>
+                              {prospect.priority}
                             </Badge>
                           ) : (
-                            <Badge variant="outline" className="text-gray-500">
-                              미거래
-                            </Badge>
+                            '-'
                           )}
                         </TableCell>
                         <TableCell>
-                          <Button variant="ghost" size="sm" asChild>
-                            <Link href={`/prospects/${prospect.id}`}>
-                              <Eye className="h-4 w-4" />
-                            </Link>
+                          {prospect.has_transaction === '거래중' ? (
+                            <Badge variant="outline" className="text-green-600">
+                              거래중
+                            </Badge>
+                          ) : prospect.has_transaction === '미거래' ? (
+                            <Badge variant="outline" className="text-gray-500">
+                              미거래
+                            </Badge>
+                          ) : (
+                            '-'
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleNaverMapClick(prospect.company_name)}
+                          >
+                            <ExternalLink className="h-4 w-4" />
                           </Button>
                         </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
-              </TabsContent>
-            ))}
+              )}
+            </TabsContent>
           </Tabs>
         </CardContent>
       </Card>

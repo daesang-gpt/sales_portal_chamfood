@@ -97,3 +97,28 @@ export interface CompanySalesData {
   total_records: number;
 }
 
+// 업체 리스트 타입
+export interface ProspectCompany {
+  id: number;
+  license_number?: string;
+  company_name: string;
+  industry: '축산물 가공장' | '식품 가공장' | '도소매';
+  ceo_name?: string;
+  location?: string;
+  main_products?: string;
+  phone?: string;
+  priority?: '높음' | '중간' | '낮음';
+  has_transaction?: '거래중' | '미거래';
+  created_at?: string;
+  updated_at?: string;
+}
+
+// 업체 리스트 통계 타입
+export interface ProspectCompanyStats {
+  [key: string]: {
+    total: number;
+    ourCustomers: number;
+    ratio: number;
+  };
+}
+

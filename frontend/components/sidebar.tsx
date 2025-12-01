@@ -76,8 +76,8 @@ export function Sidebar() {
     }
   }, [isClient])
 
-  const handleLogout = () => {
-    logout()
+  const handleLogout = async () => {
+    await logout()
     setUser(null)
     setIsLoggedIn(false)
     if (typeof window !== 'undefined') {
