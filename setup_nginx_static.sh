@@ -1,14 +1,16 @@
 #!/bin/bash
 # Nginx 정적 파일 설정 스크립트
-# 사용법: ./setup_nginx_static.sh
+# 사용법: ./setup_nginx_static.sh [프로젝트 루트 경로]
+# 예: ./setup_nginx_static.sh
+#     ./setup_nginx_static.sh /home/ubuntu/sales-portal
+#     ./setup_nginx_static.sh /opt/sales-portal
 
 set -e
 
-echo "========================================"
-echo "Nginx 정적 파일 경로 연결 설정"
-echo "========================================"
-
-STATIC_ROOT="/opt/sales-portal/backend/staticfiles"
+# 프로젝트 루트: 인자 있으면 사용, 없으면 스크립트 위치 기준
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="${1:-$SCRIPT_DIR}"
+STATIC_ROOT="$PROJECT_ROOT/backend/staticfiles"
 NGINX_CONF_DIR="/etc/nginx/conf.d"
 NGINX_SITE_CONF="$NGINX_CONF_DIR/sales-portal-static.conf"
 
@@ -30,7 +32,7 @@ if [ ! -d "$STATIC_ROOT" ]; then
     echo "❌ 정적 파일 디렉토리가 없습니다: $STATIC_ROOT"
     echo ""
     echo "먼저 collectstatic을 실행하세요:"
-    echo "  cd /opt/sales-portal/backend"
+    echo "  cd $PROJECT_ROOT/backend"
     echo "  source venv/bin/activate"
     echo "  export DJANGO_SETTINGS_MODULE=settings.production"
     echo "  python manage.py collectstatic --noinput"
@@ -43,12 +45,13 @@ if [ ! -d "$NGINX_CONF_DIR" ]; then
     sudo mkdir -p "$NGINX_CONF_DIR"
 fi
 
-# 4. Nginx 정적 파일 설정 생성
+# 4. Nginx 정적 파일 설정 생성 (location 조각 - server 블록 안에 include 필요)
 echo "[1] Nginx 설정 파일 생성 중..."
+# alias 경로에 슬래시 유지 (중요)
 sudo tee "$NGINX_SITE_CONF" > /dev/null <<EOF
-# Sales Portal 정적 파일 서빙 설정
+# Sales Portal 정적 파일 서빙 설정 (server 블록 안에 include하여 사용)
 location /static/ {
-    alias $STATIC_ROOT/;
+    alias ${STATIC_ROOT}/;
     expires 30d;
     add_header Cache-Control "public, immutable";
     access_log off;
@@ -62,11 +65,11 @@ MAIN_NGINX_CONF="/etc/nginx/nginx.conf"
 if [ -f "$MAIN_NGINX_CONF" ]; then
     if ! grep -q "include.*sales-portal-static.conf" "$MAIN_NGINX_CONF"; then
         echo ""
-        echo "[2] 메인 Nginx 설정에 include 추가 필요"
-        echo "    다음 줄을 http 블록 안에 추가하세요:"
+        echo "[2] 이 설정은 server 블록 안에서만 유효합니다."
+        echo "    기존 server 블록(예: /etc/nginx/conf.d/default.conf) 안에 다음을 추가하세요:"
         echo "    include $NGINX_CONF_DIR/sales-portal-static.conf;"
         echo ""
-        echo "    또는 server 블록에 직접 location을 추가하세요."
+        echo "    또는 전체 역방향 프록시 예시는 docs/NGINX_STATIC_SETUP.md 를 참고하세요."
     else
         echo "✅ 메인 설정에 이미 포함되어 있습니다."
     fi
@@ -95,7 +98,10 @@ echo ""
 echo "정적 파일 경로: $STATIC_ROOT"
 echo "Nginx 설정 파일: $NGINX_SITE_CONF"
 echo ""
+echo ""
 echo "테스트:"
-echo "  curl http://192.168.99.37/static/admin/css/base.css"
+echo "  curl -I http://168.107.7.140/static/admin/css/base.css"
+echo ""
+echo "전체 역방향 프록시 예시는 docs/NGINX_STATIC_SETUP.md 를 참고하세요."
 echo ""
 

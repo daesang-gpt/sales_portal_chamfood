@@ -4,6 +4,9 @@
 
 from .base import *
 import os
+from dotenv import load_dotenv
+
+load_dotenv() # .env 파일 불러오기
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.environ.get('SECRET_KEY', 'change-this-in-production')
@@ -11,17 +14,15 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'change-this-in-production')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
 
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '').split(',')
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', '172.28.25.114','211.237.27.10','168.107.7.140', '*']
 
-# Database - Oracle (운영용)
+# 이전 DB 설정은 지우거나 주석 처리하고 아래 내용으로 교체!
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.oracle',
-        'NAME': os.environ.get('DB_NAME', 'localhost:1521/XEPDB1'),
-        'USER': os.environ.get('DB_USER', 'salesportal'),
-        'PASSWORD': os.environ.get('DB_PASSWORD', 'salesportal123'),
-        'HOST': os.environ.get('DB_HOST', ''),
-        'PORT': os.environ.get('DB_PORT', ''),
+        'NAME': os.getenv('DB_NAME'),
+        'USER': os.getenv('DB_USER'),
+        'PASSWORD': os.getenv('DB_PASSWORD'),
     }
 }
 

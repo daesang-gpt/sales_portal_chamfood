@@ -5,6 +5,10 @@ Django 기본 설정
 from pathlib import Path
 import os
 
+# .env 로드 (backend/.env)
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).resolve().parent.parent / '.env')
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 

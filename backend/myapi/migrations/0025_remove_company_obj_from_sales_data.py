@@ -3,6 +3,34 @@
 from django.db import migrations
 
 
+def safe_remove_company_obj_from_sales_data(apps, schema_editor):
+    """company_obj에 대응하는 DB 컬럼이 있으면 제거 (COMPANY_CODE_ID, COMPANY_CODE_ID_TMP, COMPANY_OBJ_ID)"""
+    with schema_editor.connection.cursor() as cursor:
+        for col in ('COMPANY_CODE_ID', 'COMPANY_CODE_ID_TMP', 'COMPANY_OBJ_ID'):
+            cursor.execute("""
+                SELECT COUNT(*) FROM user_tab_columns
+                WHERE table_name = 'SALES_DATA' AND column_name = :col
+            """, {'col': col})
+            if cursor.fetchone()[0] > 0:
+                try:
+                    # FK 제약이 있으면 먼저 제거
+                    cursor.execute("""
+                        SELECT c.constraint_name FROM user_constraints c
+                        INNER JOIN user_cons_columns u ON c.constraint_name = u.constraint_name
+                        WHERE c.table_name = 'SALES_DATA' AND c.constraint_type = 'R'
+                        AND u.column_name = :col
+                    """, {'col': col})
+                    for row in cursor.fetchall():
+                        cursor.execute(f'ALTER TABLE "SALES_DATA" DROP CONSTRAINT "{row[0]}"')
+                    cursor.execute(f'ALTER TABLE "SALES_DATA" DROP COLUMN "{col}"')
+                except Exception as e:
+                    print(f"SALES_DATA 컬럼 {col} 제거 중 오류 (무시됨): {e}")
+
+
+def reverse_noop(apps, schema_editor):
+    pass
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -10,8 +38,14 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RemoveField(
-            model_name='salesdata',
-            name='company_obj',
+        migrations.RunPython(safe_remove_company_obj_from_sales_data, reverse_noop),
+        migrations.SeparateDatabaseAndState(
+            database_operations=[],
+            state_operations=[
+                migrations.RemoveField(
+                    model_name='salesdata',
+                    name='company_obj',
+                ),
+            ],
         ),
     ]

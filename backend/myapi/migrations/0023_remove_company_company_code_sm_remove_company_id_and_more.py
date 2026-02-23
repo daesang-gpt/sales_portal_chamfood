@@ -90,6 +90,13 @@ def safe_alter_financial_status(apps, schema_editor):
                     except Exception as e:
                         print(f"제약조건 삭제 중 오류 (무시됨): {e}")
                 
+                # COMPANIES에 ID 컬럼이 아직 있는지 확인 (0012에서 이미 제거되었을 수 있음)
+                cursor.execute("""
+                    SELECT COUNT(*) FROM user_tab_columns 
+                    WHERE table_name = 'COMPANIES' AND column_name = 'ID'
+                """)
+                companies_has_id = cursor.fetchone()[0] > 0
+                
                 # 컬럼 타입 확인 및 변경
                 cursor.execute("""
                     SELECT data_type 
@@ -101,23 +108,28 @@ def safe_alter_financial_status(apps, schema_editor):
                 
                 if col_type and col_type[0] != 'VARCHAR2':
                     # NUMBER 타입이면 VARCHAR2로 변경
-                    # 먼저 임시 컬럼 생성
-                    cursor.execute('ALTER TABLE "COMPANY_FINANCIAL_STATUS" ADD "COMPANY_CODE_TMP" VARCHAR2(50)')
-                    
-                    # 데이터 마이그레이션 (기존 ID를 문자열로 변환)
+                    # 임시 컬럼이 이미 있는지 확인 (이전 실행에서 실패한 경우)
                     cursor.execute("""
-                        UPDATE "COMPANY_FINANCIAL_STATUS" 
-                        SET "COMPANY_CODE_TMP" = (
-                            SELECT "COMPANY_CODE" 
-                            FROM "COMPANIES" 
-                            WHERE "COMPANIES"."ID" = "COMPANY_FINANCIAL_STATUS"."COMPANY_ID"
-                        )
+                        SELECT COUNT(*) FROM user_tab_columns 
+                        WHERE table_name = 'COMPANY_FINANCIAL_STATUS' AND column_name = 'COMPANY_CODE_TMP'
                     """)
+                    tmp_exists = cursor.fetchone()[0] > 0
+                    if not tmp_exists:
+                        cursor.execute('ALTER TABLE "COMPANY_FINANCIAL_STATUS" ADD "COMPANY_CODE_TMP" VARCHAR2(50)')
                     
-                    # 기존 컬럼 삭제
+                    if companies_has_id:
+                        # 데이터 마이그레이션 (COMPANIES.ID가 있을 때만)
+                        cursor.execute("""
+                            UPDATE "COMPANY_FINANCIAL_STATUS" 
+                            SET "COMPANY_CODE_TMP" = (
+                                SELECT "COMPANY_CODE" 
+                                FROM "COMPANIES" 
+                                WHERE "COMPANIES"."ID" = "COMPANY_FINANCIAL_STATUS"."COMPANY_ID"
+                            )
+                        """)
+                    # COMPANIES.ID가 없으면 COMPANY_CODE_TMP는 NULL로 둠
+                    
                     cursor.execute('ALTER TABLE "COMPANY_FINANCIAL_STATUS" DROP COLUMN "COMPANY_ID"')
-                    
-                    # 새 컬럼 이름 변경
                     cursor.execute('ALTER TABLE "COMPANY_FINANCIAL_STATUS" RENAME COLUMN "COMPANY_CODE_TMP" TO "COMPANY_CODE"')
                 else:
                     # 이미 VARCHAR2 타입이면 이름만 변경
@@ -169,6 +181,13 @@ def safe_alter_sales_data_company(apps, schema_editor):
                     except Exception as e:
                         print(f"제약조건 삭제 중 오류 (무시됨): {e}")
                 
+                # COMPANIES에 ID 컬럼이 아직 있는지 확인 (0012에서 이미 제거되었을 수 있음)
+                cursor.execute("""
+                    SELECT COUNT(*) FROM user_tab_columns 
+                    WHERE table_name = 'COMPANIES' AND column_name = 'ID'
+                """)
+                companies_has_id = cursor.fetchone()[0] > 0
+                
                 # 컬럼 타입 확인
                 cursor.execute("""
                     SELECT data_type 
@@ -180,23 +199,28 @@ def safe_alter_sales_data_company(apps, schema_editor):
                 
                 if col_type and col_type[0] != 'VARCHAR2':
                     # NUMBER 타입이면 VARCHAR2로 변경
-                    # 임시 컬럼 생성
-                    cursor.execute('ALTER TABLE "SALES_DATA" ADD "COMPANY_CODE_ID_TMP" VARCHAR2(50)')
-                    
-                    # 데이터 마이그레이션 (기존 ID를 company_code 문자열로 변환)
+                    # 임시 컬럼이 이미 있는지 확인 (이전 실행에서 실패한 경우)
                     cursor.execute("""
-                        UPDATE "SALES_DATA" 
-                        SET "COMPANY_CODE_ID_TMP" = (
-                            SELECT "COMPANY_CODE" 
-                            FROM "COMPANIES" 
-                            WHERE "COMPANIES"."ID" = "SALES_DATA"."COMPANY_OBJ_ID"
-                        )
+                        SELECT COUNT(*) FROM user_tab_columns 
+                        WHERE table_name = 'SALES_DATA' AND column_name = 'COMPANY_CODE_ID_TMP'
                     """)
+                    tmp_exists = cursor.fetchone()[0] > 0
+                    if not tmp_exists:
+                        cursor.execute('ALTER TABLE "SALES_DATA" ADD "COMPANY_CODE_ID_TMP" VARCHAR2(50)')
                     
-                    # 기존 컬럼 삭제
+                    if companies_has_id:
+                        # 데이터 마이그레이션 (COMPANIES.ID가 있을 때만)
+                        cursor.execute("""
+                            UPDATE "SALES_DATA" 
+                            SET "COMPANY_CODE_ID_TMP" = (
+                                SELECT "COMPANY_CODE" 
+                                FROM "COMPANIES" 
+                                WHERE "COMPANIES"."ID" = "SALES_DATA"."COMPANY_OBJ_ID"
+                            )
+                        """)
+                    # COMPANIES.ID가 없으면 COMPANY_CODE_ID_TMP는 NULL로 둠
+                    
                     cursor.execute('ALTER TABLE "SALES_DATA" DROP COLUMN "COMPANY_OBJ_ID"')
-                    
-                    # 새 컬럼 이름 변경
                     cursor.execute('ALTER TABLE "SALES_DATA" RENAME COLUMN "COMPANY_CODE_ID_TMP" TO "COMPANY_CODE_ID"')
                 else:
                     # 이미 VARCHAR2 타입이면 이름만 변경

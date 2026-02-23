@@ -7,6 +7,8 @@ const nextConfig = {
     domains: [],
     unoptimized: true, // 개발 환경에서 최적화 비활성화
   },
+  // 프로덕션 빌드 시 압축 (기본 활성화)
+  compress: true,
   // 환경 변수 설정
   env: {
     CUSTOM_KEY: 'my-value',
@@ -15,8 +17,6 @@ const nextConfig = {
   experimental: {
     // 파일 시스템 오류 방지
     optimizePackageImports: [],
-    // Next.js 15에서는 esmExternals가 더 이상 experimental이 아님
-    // esmExternals: 'loose', // 제거 - Next.js 15에서 경고 발생
   },
   // Windows 환경에서 파일 시스템 오류 방지를 위한 설정
   outputFileTracingIncludes: {},
@@ -52,20 +52,25 @@ const nextConfig = {
     }
     return config;
   },
-  // 헤더 설정
+  // 보안·성능 헤더 (프로덕션/개발 공통)
   async headers() {
     return [
       {
         source: '/(.*)',
         headers: [
-          {
-            key: 'X-Frame-Options',
-            value: 'DENY',
-          },
-          {
-            key: 'X-Content-Type-Options',
-            value: 'nosniff',
-          },
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'X-XSS-Protection', value: '1; mode=block' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+          { key: 'Cache-Control', value: 'public, max-age=0, must-revalidate' },
+        ],
+      },
+      // 정적 에셋은 장기 캐시 (성능)
+      {
+        source: '/_next/static/(.*)',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
         ],
       },
     ];
