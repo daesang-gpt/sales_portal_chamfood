@@ -79,65 +79,65 @@ class Company(models.Model):
     website = models.URLField(max_length=200, blank=True, null=True, verbose_name='웹사이트')
     remarks = models.TextField(blank=True, null=True, verbose_name='참고사항')
     
-    # SAP정보
-    sap_code_type = models.CharField(max_length=50, blank=True, null=True, verbose_name='SAP코드여부')  # 매입, 매출, 매입매출
-    company_code_sap = models.CharField(max_length=50, blank=True, null=True, verbose_name='SAP거래처코드')
+    # ERP정보
+    erp_code_type = models.CharField(max_length=50, blank=True, null=True, verbose_name='ERP코드여부')  # 매입, 매출, 매입매출
+    company_code_erp = models.CharField(max_length=50, blank=True, null=True, verbose_name='ERP거래처코드')
     biz_code = models.CharField(max_length=50, blank=True, null=True, verbose_name='사업')
-    biz_name = models.CharField(max_length=200, blank=True, null=True, verbose_name='사업부')
     department_code = models.CharField(max_length=50, blank=True, null=True, verbose_name='지점/팀')
-    department = models.CharField(max_length=100, blank=True, null=True, verbose_name='팀명')
     employee_number = models.CharField(max_length=50, blank=True, null=True, verbose_name='사원번호')
     employee_name = models.CharField(max_length=100, blank=True, null=True, verbose_name='영업 사원')
     distribution_type_sap_code = models.CharField(max_length=50, blank=True, null=True, verbose_name='유통형태코드')
     distribution_type_sap = models.CharField(max_length=100, blank=True, null=True, verbose_name='유통형태')
     contact_person = models.CharField(max_length=100, blank=True, null=True, verbose_name='거래처 담당자')
     contact_phone = models.CharField(max_length=20, blank=True, null=True, verbose_name='담당자 연락처')
-    code_create_date = models.DateField(blank=True, null=True, verbose_name='코드생성일')
+    registration_date = models.DateField(blank=True, null=True, verbose_name='등록일자')
     transaction_start_date = models.DateField(blank=True, null=True, verbose_name='거래시작일')
     payment_terms = models.CharField(max_length=200, blank=True, null=True, verbose_name='결제조건')
+    purchase_unit_price = models.IntegerField(blank=True, null=True, verbose_name='매입단가')
+    sale_unit_price = models.IntegerField(blank=True, null=True, verbose_name='매출단가')
 
     def calculate_customer_classification(self):
         """
         고객 구분을 자동으로 계산하는 메서드
         규칙:
-        - 벤더: SAP 코드여부 속성이 매입인 거래처
-        - 잠재: SAP 코드가 없는 거래처
-        - 신규: SAP 코드가 있고 코드생성일 기준 3개월 이내인 거래처
-        - 기존: SAP 코드가 있고 코드생성일 기준 3개월 초과인 거래처
-        - 이탈: SAP 코드가 있고, 마지막 거래일이 3개월 초과인 거래처 (거래일 없으면 이탈)
+        - 벤더: ERP 코드여부 속성이 매입인 거래처
+        - 잠재: ERP 코드가 없는 거래처
+        - 신규: ERP 코드가 있고 등록일자 기준 3개월 이내인 거래처
+        - 기존: ERP 코드가 있고 등록일자 기준 3개월 초과인 거래처
+        - 이탈: ERP 코드가 있고, 마지막 거래일이 3개월 초과인 거래처 (거래일 없으면 이탈)
         """
         from datetime import date, timedelta
         from django.utils import timezone
         
         today = timezone.now().date()
         
-        # 1. 벤더 확인: SAP 코드여부 속성이 매입인 거래처
-        if self.sap_code_type == '매입':
+        # 1. 벤더 확인: ERP 코드여부 속성이 매입인 거래처
+        if self.erp_code_type == '매입':
             return '벤더'
         
-        # 2. 잠재 확인: SAP 코드가 없는 거래처
-        if not self.company_code_sap:
+        # 2. 잠재 확인: ERP 코드가 없는 거래처
+        if not self.company_code_erp:
             return '잠재'
         
-        # 3. 마지막 거래일 조회 (SalesData에서 company_code_sap로 매칭)
+        # 3. 마지막 거래일 조회 (SalesData에서 company_code_erp로 매칭)
         last_transaction = None
-        if self.company_code_sap:
+        if self.company_code_erp:
             try:
                 last_transaction = SalesData.objects.filter(
-                    코드=self.company_code_sap
+                    코드=self.company_code_erp
                 ).order_by('-매출일자').first()
             except Exception:
                 pass
         
-        # 4. 코드생성일 기준 신규/기존 판단
-        if self.code_create_date:
-            days_since_code_creation = (today - self.code_create_date).days
+        # 4. 등록일자 기준 신규/기존 판단
+        if self.registration_date:
+            days_since_registration = (today - self.registration_date).days
             
-            # SAP 코드가 있고 코드생성일 기준 3개월 이내이면 신규
-            if days_since_code_creation <= 90:
+            # ERP 코드가 있고 등록일자 기준 3개월 이내이면 신규
+            if days_since_registration <= 90:
                 return '신규'
             
-            # SAP 코드가 있고 코드생성일 기준 3개월 초과이면 기존 또는 이탈
+            # ERP 코드가 있고 등록일자 기준 3개월 초과이면 기존 또는 이탈
             # 마지막 거래일 확인
             if last_transaction and last_transaction.매출일자:
                 days_since_last_transaction = (today - last_transaction.매출일자).days
@@ -150,7 +150,7 @@ class Company(models.Model):
                 # 거래일이 없으면 이탈
                 return '이탈'
         else:
-            # 코드생성일이 없으면 마지막 거래일만 확인
+            # 등록일자가 없으면 마지막 거래일만 확인
             if last_transaction and last_transaction.매출일자:
                 days_since_last_transaction = (today - last_transaction.매출일자).days
                 if days_since_last_transaction > 90:
@@ -262,42 +262,25 @@ class CompanyFinancialStatus(models.Model):
             return f"Financial Status - {self.fiscal_year}"
 
 class SalesData(models.Model):
-    """실제 매출 데이터 모델"""
+    """실제 매출 데이터 모델 (매출현황.tsv 기반)"""
     매출일자 = models.DateField(verbose_name='매출일자', db_column='sale_date')
     코드 = models.CharField(max_length=50, blank=True, null=True, verbose_name='코드', db_column='code')
     거래처명 = models.CharField(max_length=200, verbose_name='거래처명', db_column='customer_name')
-    매출부서 = models.CharField(max_length=100, blank=True, null=True, verbose_name='매출부서', db_column='sales_dept')
-    매출담당자 = models.CharField(max_length=100, blank=True, null=True, verbose_name='매출담당자', db_column='sales_person')
-    유통형태 = models.CharField(max_length=100, blank=True, null=True, verbose_name='유통형태', db_column='distribution_type')
-    상품코드 = models.CharField(max_length=100, blank=True, null=True, verbose_name='상품코드', db_column='product_code')
-    상품명 = models.CharField(max_length=200, blank=True, null=True, verbose_name='상품명', db_column='product_name')
-    브랜드 = models.CharField(max_length=100, blank=True, null=True, verbose_name='브랜드', db_column='brand')
-    축종 = models.CharField(max_length=100, blank=True, null=True, verbose_name='축종', db_column='livestock_type')
-    부위 = models.CharField(max_length=100, blank=True, null=True, verbose_name='부위', db_column='cut_type')
-    원산지 = models.CharField(max_length=100, blank=True, null=True, verbose_name='원산지', db_column='origin')
-    축종_부위 = models.CharField(max_length=100, blank=True, null=True, verbose_name='축종-부위', db_column='livestock_cut')
-    원산지_축종 = models.CharField(max_length=100, blank=True, null=True, verbose_name='원산지', db_column='origin_livestock')
-    등급 = models.CharField(max_length=50, blank=True, null=True, verbose_name='등급', db_column='grade')
-    Box = models.IntegerField(blank=True, null=True, verbose_name='Box', db_column='box')
-    중량_Kg = models.FloatField(blank=True, null=True, verbose_name='중량(Kg)', db_column='WEIGHT_KG')
-    매출단가 = models.IntegerField(blank=True, null=True, verbose_name='매출단가', db_column='sale_unit_price')
-    매출금액 = models.BigIntegerField(verbose_name='매출금액', db_column='sale_amount')
-    매출이익 = models.BigIntegerField(blank=True, null=True, verbose_name='매출이익', db_column='sale_profit')
-    이익율 = models.FloatField(blank=True, null=True, verbose_name='이익율', db_column='profit_rate')
-    매입처 = models.CharField(max_length=200, blank=True, null=True, verbose_name='매입 처', db_column='purchase_source')
-    매입일자 = models.DateField(blank=True, null=True, verbose_name='매입일자', db_column='purchase_date')
-    재고보유일 = models.IntegerField(blank=True, null=True, verbose_name='재고보유일', db_column='inventory_days')
-    수입로컬 = models.CharField(max_length=20, blank=True, null=True, verbose_name='수입/로컬', db_column='import_local')
-    이관재고여부 = models.CharField(max_length=20, blank=True, null=True, verbose_name='이관재고 여부', db_column='transfer_inventory_yn')
-    담당자 = models.CharField(max_length=100, blank=True, null=True, verbose_name='담당자', db_column='manager')
-    매입단가 = models.IntegerField(blank=True, null=True, verbose_name='매입단가', db_column='purchase_unit_price')
-    매입금액 = models.BigIntegerField(blank=True, null=True, verbose_name='매입금액', db_column='purchase_amount')
-    지점명 = models.CharField(max_length=100, blank=True, null=True, verbose_name='지점명', db_column='branch_name')
-    매출비고 = models.TextField(blank=True, null=True, verbose_name='매출비고', db_column='sale_note')
-    매입비고 = models.TextField(blank=True, null=True, verbose_name='매입비고', db_column='purchase_note')
-    이력번호 = models.CharField(max_length=100, blank=True, null=True, verbose_name='이력번호', db_column='history_no')
-    BL번호 = models.CharField(max_length=100, blank=True, null=True, verbose_name='B/L번호(도체번호)', db_column='bl_number')
-    
+    거래처약칭 = models.CharField(max_length=200, blank=True, null=True, verbose_name='거래처약칭', db_column='customer_abbr')
+    품목코드 = models.CharField(max_length=100, blank=True, null=True, verbose_name='품목코드', db_column='item_code')
+    품목약칭 = models.CharField(max_length=200, blank=True, null=True, verbose_name='품목약칭', db_column='item_abbr')
+    품목명칭 = models.CharField(max_length=200, blank=True, null=True, verbose_name='품목명칭', db_column='item_name')
+    단위 = models.CharField(max_length=20, blank=True, null=True, verbose_name='단위', db_column='unit')
+    규격 = models.CharField(max_length=50, blank=True, null=True, verbose_name='규격', db_column='spec')
+    건수 = models.IntegerField(blank=True, null=True, verbose_name='건수', db_column='count')
+    수량 = models.FloatField(blank=True, null=True, verbose_name='수량', db_column='quantity')
+    중량 = models.FloatField(blank=True, null=True, verbose_name='중량', db_column='weight')
+    출고단가 = models.IntegerField(blank=True, null=True, verbose_name='출고단가', db_column='ship_unit_price')
+    공급가액 = models.BigIntegerField(blank=True, null=True, verbose_name='공급가액', db_column='supply_amount')
+    부가세액 = models.BigIntegerField(blank=True, null=True, verbose_name='부가세액', db_column='vat_amount')
+    매출금액 = models.BigIntegerField(verbose_name='합계금액', db_column='sale_amount')
+    보관방법 = models.CharField(max_length=100, blank=True, null=True, verbose_name='보관방법', db_column='storage_method')
+    소비기간 = models.CharField(max_length=50, blank=True, null=True, verbose_name='소비기간', db_column='consumption_period')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='생성일시')
 
     class Meta:

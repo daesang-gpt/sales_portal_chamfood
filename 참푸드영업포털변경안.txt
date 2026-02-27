@@ -1,0 +1,38 @@
+변경 포인트
+1) 브랜딩/앱이름
+참푸드 영업포털
+
+2) 백엔드 - 거래처/회사 도메인
+Company(@거래처현황.tsv)
+기본정보 유지
+SAP정보 변경(필드명 SAP > ERP 변경)
+SAP코드여부 > ERP코드여부 변경
+SAP거래처코드 > ERP거래처코드 변경
+사업부 삭제
+팀명 삭제
+영업 사원 유지
+거래처 담당자 유지
+담당자 연락처 유지
+코드생성일 > 등록일자 변경
+매입단가 추가
+매출단가 추가
+
+Report 유지
+
+ProspectCompany 유지
+
+SalesData 변경(@매출현황.tsv)
+
+LOCATION_CHOICES 유지
+
+3) 백엔드 - 뷰/시리얼라이저/크론
+backend/myapi/views.py
+customer_classification 필터/집계, 한글 라벨(고객분류, SAP거래처코드, 거래처 담당자 등)이 하드코딩된 부분을 새 choices/용어에 맞게 수정.
+엑셀/CSV 내보내기 컬럼 헤더('회사코드', '회사명', '고객분류', ...)를 새 스키마/용어에 맞게 수정.
+SAP TSV 업로드(고객, 고객번호1 등)는 새 회사 ERP 포맷에 맞게 컬럼 매핑 수정.
+backend/myapi/serializers.py
+CompanySerializer 등에서 필드 목록과 choices가 모델과 일치하도록 수정.
+backend/myapi/cron.py
+update_customer_classifications: 고객 구분 로직이 Company.calculate_customer_classification()에 맞춰져 있으므로, 위에서 그 메서드를 바꾸면 크론은 그대로 둬도 됨. 필요하면 설명 주석만 새 규칙으로 수정.
+backend/myapi/management/commands/
+import_company_tsv.py, import_companies_csv.py 등: TSV/CSV 컬럼명이 현재 도메인(고객분류, SAP거래처코드, 거래처 담당자 등)에 맞춰져 있음. 새 회사 포맷에 맞게 컬럼 매핑 수정.

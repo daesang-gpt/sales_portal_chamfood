@@ -4,8 +4,8 @@ import "./globals.css"
 import { Sidebar } from "@/components/sidebar"
 
 export const metadata: Metadata = {
-  title: "축산물 영업 포털",
-  description: "축산물 영업 관리 시스템",
+  title: "참푸드 영업포털",
+  description: "참푸드 영업 관리 시스템",
     generator: 'v0.dev'
 }
 

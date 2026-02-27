@@ -11,22 +11,36 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox"
 import { ArrowLeft, Save, Loader2 } from "lucide-react"
 import Link from "next/link"
-import { companyApi, Company } from "@/lib/api"
+import { companyApi, Company, usersApi } from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
 import { LocationSelect } from "@/components/ui/location-select"
 import { SapCodeSelect } from "@/components/ui/sap-code-select"
-import { bizCodes, departmentCodes, employeeCodes, distributionTypeCodes, paymentTerms } from "@/lib/constants/sapCodes"
+import { paymentTerms } from "@/lib/constants/sapCodes"
+import type { ErpCodeOption } from "@/lib/constants/erpCodes"
 import { getUserFromToken } from "@/lib/auth"
 
 export default function NewCompanyPage() {
   const router = useRouter()
   const { toast } = useToast()
   const [loading, setLoading] = useState(false)
-  // SAP코드여부 체크박스 상태
-  const [sapHasPurchase, setSapHasPurchase] = useState(false)
-  const [sapHasSales, setSapHasSales] = useState(false)
+  // ERP코드여부 체크박스 상태
+  const [erpHasPurchase, setErpHasPurchase] = useState(false)
+  const [erpHasSales, setErpHasSales] = useState(false)
   const [isViewer, setIsViewer] = useState(false)
   const [isCheckingRole, setIsCheckingRole] = useState(true)
+
+  // 영업 사원 옵션 (User 모델에서 동적 로드)
+  const [employeeOptions, setEmployeeOptions] = useState<ErpCodeOption[]>([])
+
+  useEffect(() => {
+    usersApi.getUsers().then((users) => {
+      setEmployeeOptions(
+        users
+          .filter((u) => u.name)
+          .map((u) => ({ code: u.employee_number || u.username, name: u.name }))
+      )
+    }).catch(() => {/* 조회 실패 시 빈 목록 유지 */})
+  }, [])
 
   useEffect(() => {
     const currentUser = getUserFromToken();
@@ -65,22 +79,20 @@ export default function NewCompanyPage() {
     products: "",
     website: "",
     remarks: "",
-    // SAP정보
-    sap_code_type: "",
-    company_code_sap: "",
-    biz_code: "",
-    biz_name: "",
-    department_code: "",
-    department: "",
+    // ERP정보
+    erp_code_type: "",
+    company_code_erp: "",
     employee_number: "",
     employee_name: "",
     distribution_type_sap_code: "",
     distribution_type_sap: "",
     contact_person: "",
     contact_phone: "",
-    code_create_date: "",
+    registration_date: "",
     transaction_start_date: "",
     payment_terms: "",
+    purchase_unit_price: "",
+    sale_unit_price: "",
   })
 
   const handleInputChange = (field: string, value: string) => {
@@ -90,24 +102,24 @@ export default function NewCompanyPage() {
     }))
   }
 
-  // SAP코드여부 체크박스 핸들러
-  const handleSapCodeTypeChange = (purchase: boolean, sales: boolean) => {
-    setSapHasPurchase(purchase)
-    setSapHasSales(sales)
+  // ERP코드여부 체크박스 핸들러
+  const handleErpCodeTypeChange = (purchase: boolean, sales: boolean) => {
+    setErpHasPurchase(purchase)
+    setErpHasSales(sales)
     
-    // 체크 상태에 따라 sap_code_type 값 계산
-    let sapCodeType: string | null = null
+    // 체크 상태에 따라 erp_code_type 값 계산
+    let erpCodeType: string | null = null
     if (purchase && sales) {
-      sapCodeType = '매입매출'
+      erpCodeType = '매입매출'
     } else if (purchase) {
-      sapCodeType = '매입'
+      erpCodeType = '매입'
     } else if (sales) {
-      sapCodeType = '매출'
+      erpCodeType = '매출'
     }
     
     setFormData(prev => ({
       ...prev,
-      sap_code_type: sapCodeType || ''
+      erp_code_type: erpCodeType || ''
     }))
   }
 
@@ -349,37 +361,37 @@ export default function NewCompanyPage() {
             </CardContent>
           </Card>
 
-          {/* SAP 정보 */}
+          {/* ERP 정보 */}
           <Card>
             <CardHeader>
-              <CardTitle>SAP 정보</CardTitle>
-              <CardDescription>SAP 관련 정보를 입력해주세요.</CardDescription>
+              <CardTitle>ERP 정보</CardTitle>
+              <CardDescription>ERP 관련 정보를 입력해주세요.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label className="text-sm font-semibold text-foreground">SAP코드여부</Label>
+                <Label className="text-sm font-semibold text-foreground">ERP코드여부</Label>
                 <div className="flex items-center space-x-4">
                   <div className="flex items-center space-x-2">
                     <Checkbox
-                      id="sap_has_purchase"
-                      checked={sapHasPurchase}
+                      id="erp_has_purchase"
+                      checked={erpHasPurchase}
                       onCheckedChange={(checked) => {
-                        handleSapCodeTypeChange(checked === true, sapHasSales)
+                        handleErpCodeTypeChange(checked === true, erpHasSales)
                       }}
                     />
-                    <Label htmlFor="sap_has_purchase" className="font-normal cursor-pointer">
+                    <Label htmlFor="erp_has_purchase" className="font-normal cursor-pointer">
                       매입
                     </Label>
                   </div>
                   <div className="flex items-center space-x-2">
                     <Checkbox
-                      id="sap_has_sales"
-                      checked={sapHasSales}
+                      id="erp_has_sales"
+                      checked={erpHasSales}
                       onCheckedChange={(checked) => {
-                        handleSapCodeTypeChange(sapHasPurchase, checked === true)
+                        handleErpCodeTypeChange(erpHasPurchase, checked === true)
                       }}
                     />
-                    <Label htmlFor="sap_has_sales" className="font-normal cursor-pointer">
+                    <Label htmlFor="erp_has_sales" className="font-normal cursor-pointer">
                       매출
                     </Label>
                   </div>
@@ -387,39 +399,17 @@ export default function NewCompanyPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="company_code_sap" className="text-sm font-semibold text-foreground">SAP거래처코드</Label>
+                <Label htmlFor="company_code_erp" className="text-sm font-semibold text-foreground">ERP거래처코드</Label>
                 <Input
-                  id="company_code_sap"
-                  value={formData.company_code_sap}
-                  onChange={(e) => handleInputChange("company_code_sap", e.target.value)}
-                  placeholder="SAP거래처코드를 입력하세요"
+                  id="company_code_erp"
+                  value={formData.company_code_erp}
+                  onChange={(e) => handleInputChange("company_code_erp", e.target.value)}
+                  placeholder="ERP거래처코드를 입력하세요"
                 />
               </div>
 
               <SapCodeSelect
-                options={bizCodes}
-                codeValue={formData.biz_code}
-                nameValue={formData.biz_name}
-                onCodeChange={(code) => handleInputChange("biz_code", code)}
-                onNameChange={(name) => handleInputChange("biz_name", name)}
-                codeLabel="사업"
-                nameLabel="사업부"
-                namePlaceholder="사업부를 선택하세요"
-              />
-
-              <SapCodeSelect
-                options={departmentCodes}
-                codeValue={formData.department_code}
-                nameValue={formData.department}
-                onCodeChange={(code) => handleInputChange("department_code", code)}
-                onNameChange={(name) => handleInputChange("department", name)}
-                codeLabel="지점/팀"
-                nameLabel="팀명"
-                namePlaceholder="팀명을 선택하세요"
-              />
-
-              <SapCodeSelect
-                options={employeeCodes}
+                options={employeeOptions}
                 codeValue={formData.employee_number}
                 nameValue={formData.employee_name}
                 onCodeChange={(code) => handleInputChange("employee_number", code)}
@@ -429,16 +419,28 @@ export default function NewCompanyPage() {
                 namePlaceholder="영업 사원을 선택하세요"
               />
 
-              <SapCodeSelect
-                options={distributionTypeCodes}
-                codeValue={formData.distribution_type_sap_code}
-                nameValue={formData.distribution_type_sap}
-                onCodeChange={(code) => handleInputChange("distribution_type_sap_code", code)}
-                onNameChange={(name) => handleInputChange("distribution_type_sap", name)}
-                codeLabel="유통형태코드"
-                nameLabel="유통형태"
-                namePlaceholder="유통형태를 선택하세요"
-              />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="purchase_unit_price" className="text-sm font-semibold text-foreground">매입단가</Label>
+                  <Input
+                    id="purchase_unit_price"
+                    type="number"
+                    value={formData.purchase_unit_price}
+                    onChange={(e) => handleInputChange("purchase_unit_price", e.target.value)}
+                    placeholder="매입단가"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="sale_unit_price" className="text-sm font-semibold text-foreground">매출단가</Label>
+                  <Input
+                    id="sale_unit_price"
+                    type="number"
+                    value={formData.sale_unit_price}
+                    onChange={(e) => handleInputChange("sale_unit_price", e.target.value)}
+                    placeholder="매출단가"
+                  />
+                </div>
+              </div>
 
               <div className="space-y-2">
                 <Label htmlFor="contact_person" className="text-sm font-semibold text-foreground">거래처 담당자</Label>
@@ -461,12 +463,12 @@ export default function NewCompanyPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="code_create_date" className="text-sm font-semibold text-foreground">코드생성일</Label>
+                <Label htmlFor="registration_date" className="text-sm font-semibold text-foreground">등록일자</Label>
                 <Input
-                  id="code_create_date"
+                  id="registration_date"
                   type="date"
-                  value={formData.code_create_date}
-                  onChange={(e) => handleInputChange("code_create_date", e.target.value)}
+                  value={formData.registration_date}
+                  onChange={(e) => handleInputChange("registration_date", e.target.value)}
                 />
               </div>
 

@@ -187,15 +187,15 @@ export default function CompaniesPage() {
     return company.city_district || '-'
   }
 
-  const getCompanySapCodeType = (company: Company) => {
-    return company.sap_code_type || '-'
+  const getCompanyErpCodeType = (company: Company) => {
+    return company.erp_code_type || '-'
   }
 
   const getCompanyStartDate = (company: Company) => {
     return company.transaction_start_date || '-'
   }
 
-  const getSapCodeBadgeStyle = (sapCodeType: string) => {
+  const getErpCodeBadgeStyle = (sapCodeType: string) => {
     if (sapCodeType === "매출") {
       return "bg-black text-white border-black";
     } else if (sapCodeType === "매입") {
@@ -298,7 +298,7 @@ export default function CompaniesPage() {
                 </>
               )}
             </div>
-            <p className="text-xs text-muted-foreground">SAP 거래처 등록 전, 컨택 업체</p>
+            <p className="text-xs text-muted-foreground">ERP 거래처 등록 전, 컨택 업체</p>
           </CardContent>
         </Card>
 
@@ -320,7 +320,7 @@ export default function CompaniesPage() {
                 </>
               )}
             </div>
-            <p className="text-xs text-muted-foreground">SAP 등록일 기준 3개월 이내 업체</p>
+            <p className="text-xs text-muted-foreground">ERP 등록일 기준 3개월 이내 업체</p>
           </CardContent>
         </Card>
 
@@ -342,7 +342,7 @@ export default function CompaniesPage() {
                 </>
               )}
             </div>
-            <p className="text-xs text-muted-foreground">SAP 등록일 기준 3개월 초과 업체</p>
+            <p className="text-xs text-muted-foreground">ERP 등록일 기준 3개월 초과 업체</p>
           </CardContent>
         </Card>
 
@@ -365,7 +365,7 @@ export default function CompaniesPage() {
               )}
             </div>
             <p className="text-xs text-muted-foreground">마지막 거래일 3개월 초과 업체</p>
-            <p className="text-xs text-muted-foreground">(SAP 등록 후 미거래 업체 포함)</p>
+            <p className="text-xs text-muted-foreground">(ERP 등록 후 미거래 업체 포함)</p>
           </CardContent>
         </Card>
       </div>
@@ -412,7 +412,7 @@ export default function CompaniesPage() {
                 <TableHead>시/구</TableHead>
                 <TableHead>대표자</TableHead>
                 <TableHead>영업 사원</TableHead>
-                <TableHead>SAP코드여부</TableHead>
+                <TableHead>ERP코드여부</TableHead>
                 <TableHead>거래개시일</TableHead>
               </TableRow>
             </TableHeader>
@@ -451,13 +451,13 @@ export default function CompaniesPage() {
                   <TableCell>{getSalesPersonName(company)}</TableCell>
                   <TableCell>
                     {(() => {
-                      const sapCodeType = getCompanySapCodeType(company);
+                      const erpCodeType = getCompanyErpCodeType(company);
                       return (
                         <Badge 
-                          variant={sapCodeType === '-' ? "secondary" : "outline"}
-                          className={getSapCodeBadgeStyle(sapCodeType) || undefined}
+                          variant={erpCodeType === '-' ? "secondary" : "outline"}
+                          className={getErpCodeBadgeStyle(erpCodeType) || undefined}
                         >
-                          {sapCodeType}
+                          {erpCodeType}
                         </Badge>
                       );
                     })()}

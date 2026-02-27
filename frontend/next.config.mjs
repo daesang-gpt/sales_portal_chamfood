@@ -54,6 +54,7 @@ const nextConfig = {
   },
   // 보안·성능 헤더 (프로덕션/개발 공통)
   async headers() {
+    const isDev = process.env.NODE_ENV === 'development';
     return [
       {
         source: '/(.*)',
@@ -66,11 +67,11 @@ const nextConfig = {
           { key: 'Cache-Control', value: 'public, max-age=0, must-revalidate' },
         ],
       },
-      // 정적 에셋은 장기 캐시 (성능)
+      // 정적 에셋: 개발 시 캐시 비활성화(청크 타임아웃 방지), 프로덕션에서만 장기 캐시
       {
         source: '/_next/static/(.*)',
         headers: [
-          { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+          { key: 'Cache-Control', value: isDev ? 'no-store, no-cache, must-revalidate' : 'public, max-age=31536000, immutable' },
         ],
       },
     ];

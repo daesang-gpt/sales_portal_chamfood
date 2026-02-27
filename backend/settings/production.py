@@ -14,7 +14,15 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'change-this-in-production')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '172.28.25.114','211.237.27.10','168.107.7.140', '*']
+ALLOWED_HOSTS = [
+    'sales.chamfood.co.kr',
+    '140.245.76.188',
+    'localhost',
+    '127.0.0.1',
+    '172.28.25.114',
+    '211.237.27.10',
+    '168.107.7.140',
+]
 
 # 이전 DB 설정은 지우거나 주석 처리하고 아래 내용으로 교체!
 DATABASES = {
@@ -26,6 +34,12 @@ DATABASES = {
     }
 }
 
+# CORS 설정 (운영 환경 - 특정 오리진만 허용)
+CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOWED_ORIGINS = [
+    'https://sales.chamfood.co.kr',
+]
+
 # 보안 설정
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
@@ -34,6 +48,7 @@ X_FRAME_OPTIONS = 'DENY'
 # Static files 설정 (운영용)
 # BASE_DIR이 Path 객체이므로 명시적으로 절대 경로 문자열로 변환
 # backend 디렉토리 안에 staticfiles 생성
+STATIC_URL = '/static/'
 STATIC_ROOT = os.path.abspath(os.path.join(str(BASE_DIR), 'backend', 'staticfiles'))
 
 # 운영 환경에서 개발 서버를 사용하는 경우 정적 파일 서빙 활성화

@@ -5,14 +5,15 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import update_last_login
 from rest_framework_simplejwt.tokens import RefreshToken
-from django.db.models import Q, Max, Sum, Value
+from django.db.models import Q, Max, Sum, Value, Count
 from django.db.models.functions import Replace
 from django.utils import timezone
 from datetime import timedelta, datetime, date
 from .models import Company, Report, User, CompanyFinancialStatus, SalesData, AuditLog, ProspectCompany
 from .serializers import CompanySerializer, ReportSerializer, UserSerializer, LoginSerializer, RegisterSerializer, CompanyFinancialStatusSerializer, SalesDataSerializer, ForgotPasswordSerializer, ChangePasswordSerializer, AuditLogSerializer, ProspectCompanySerializer
-from keybert import KeyBERT
-from sentence_transformers import SentenceTransformer, util
+# KeyBERT와 sentence_transformers는 지연 로딩 (PyTorch DLL 오류 방지)
+# from keybert import KeyBERT
+# from sentence_transformers import SentenceTransformer, util
 import numpy as np
 from rest_framework.pagination import PageNumberPagination
 from . import models
@@ -57,6 +58,8 @@ def has_global_view_access(user):
 # 태그 후보 및 임베딩을 DB에서 불러와 캐싱
 def load_tag_candidates_and_embeddings():
     global TAG_CANDIDATES, TAG_EMBEDDINGS, TAG_MODEL
+    # 지연 로딩: sentence_transformers는 여기서만 import
+    from sentence_transformers import SentenceTransformer
     # 모든 Report의 tags 필드에서 유니크한 태그 추출
     tag_set = set()
     for report in Report.objects.exclude(tags__isnull=True).exclude(tags__exact=''):
@@ -117,7 +120,7 @@ class CompanyViewSet(viewsets.ModelViewSet):
                 Q(employee_name_norm__icontains=normalized_search) |
                 Q(contact_person__icontains=search) |
                 Q(company_code__icontains=search) |
-                Q(company_code_sap__icontains=search)
+                Q(company_code_erp__icontains=search)
             )
         if customer_classification:
             queryset = queryset.filter(customer_classification=customer_classification)
@@ -807,8 +810,10 @@ class ReportViewSet(viewsets.ModelViewSet):
 @permission_classes([AllowAny])
 def login_view(request):
     try:
-        # GET 또는 OPTIONS 요청 처리 (CORS preflight)
-        if request.method == 'GET' or request.method == 'OPTIONS':
+        # GET 또는 OPTIONS 요청 처리 (CORS preflight는 200으로 성공 처리)
+        if request.method == 'OPTIONS':
+            return Response(status=status.HTTP_200_OK)
+        if request.method == 'GET':
             return Response({
                 'success': False,
                 'message': 'POST 요청만 지원됩니다.'
@@ -1077,7 +1082,7 @@ def company_stats_view(request):
                 Q(employee_name_norm__icontains=normalized_search) |
                 Q(contact_person__icontains=search) |
                 Q(company_code__icontains=search) |
-                Q(company_code_sap__icontains=search)
+                Q(company_code_erp__icontains=search)
             )
         
         # 전체 통계
@@ -1198,36 +1203,16 @@ def dashboard_stats_view(request):
         total_phone = reports_queryset.filter(type='전화').count()
         total_contacts = total_face_to_face + total_phone
         
-        # 4. 이번 달 매출 (실제 SalesData 기반)
+        # 4. 이번 달 매출 (실제 SalesData 기반 - 전체 사용자 공개)
         this_month_revenue = 0
         try:
-            # 이번 달 SalesData 조회
             this_month_sales = SalesData.objects.filter(
                 매출일자__year=current_year,
                 매출일자__month=current_month
             )
-            
-            # 사용자별 필터링 (이름 공백 제거 매칭 포함)
-            normalized_name = (user.name or '').replace(' ', '') if hasattr(user, 'name') else ''
-            this_month_sales = this_month_sales.annotate(
-                매출담당자_norm=Replace('매출담당자', Value(' '), Value('')),
-                담당자_norm=Replace('담당자', Value(' '), Value(''))
-            )
-            if not has_global_view_access(user):
-                this_month_sales = this_month_sales.filter(
-                    Q(매출담당자_norm__icontains=normalized_name)
-                )
-            
-            # 이번 달 매출 합계
-            this_month_revenue = sum(sales.매출금액 for sales in this_month_sales)
-            
-            # 매출이 0이면 영업일지 기반 추정
-            if this_month_revenue == 0:
-                this_month_revenue = this_month_reports * 30000000  # 영업일지 1건당 약 3천만원 가정
-                
+            this_month_revenue = this_month_sales.aggregate(total=Sum('매출금액'))['total'] or 0
         except Exception as e:
-            # 매출 데이터가 없거나 오류 발생 시 기본값
-            this_month_revenue = this_month_reports * 30000000  # 영업일지 1건당 약 3천만원 가정
+            this_month_revenue = 0
         
         # 전월 매출 (비슷한 방식으로 계산, 실제로는 별도 로직 필요)
         revenue_growth_rate = 15.5  # 임시로 고정값 사용
@@ -1277,116 +1262,42 @@ def dashboard_charts_data_view(request):
         current_year = now.year
         current_month = now.month
         
-        # 최근 6개월 매출 추이 데이터 생성 (실제 SalesData 기반)
+        # 최근 6개월 월별 매출 추이 (전체 사용자 공개)
         from datetime import datetime, timedelta
         from calendar import monthrange
         sales_data = []
-        
-        for i in range(6):  # 최근 6개월 (0 = 현재월, 5 = 5개월 전)
-            # 정확한 월 계산
+
+        for i in range(6):
             target_year = current_year
             target_month = current_month - i
-            
             if target_month <= 0:
                 target_month += 12
                 target_year -= 1
-            
+
             month_name = f"{target_month}월"
-            
-            # 해당 월의 실제 매출 데이터 조회
-            monthly_sales_queryset = SalesData.objects.filter(
+            agg = SalesData.objects.filter(
                 매출일자__year=target_year,
                 매출일자__month=target_month
+            ).aggregate(
+                total_revenue=Sum('매출금액'),
+                total_count=Count('id')
             )
-            
-            # 사용자별 필터링 (관리자가 아닌 경우) - 이름 공백 제거 매칭 포함
-            normalized_name = (user.name or '').replace(' ', '') if hasattr(user, 'name') else ''
-            monthly_sales_queryset = monthly_sales_queryset.annotate(
-                매출담당자_norm=Replace('매출담당자', Value(' '), Value('')),
-                담당자_norm=Replace('담당자', Value(' '), Value(''))
-            )
-            if not has_global_view_access(user):
-                monthly_sales_queryset = monthly_sales_queryset.filter(
-                    Q(매출담당자_norm__icontains=normalized_name)
-                )
-            
-            # 월별 매출 합계 계산
-            monthly_revenue = sum((sales.매출금액 or 0) for sales in monthly_sales_queryset)
-            monthly_profit = sum((sales.매출이익 or 0) for sales in monthly_sales_queryset)
-            monthly_quantity = sum((sales.Box or 0) for sales in monthly_sales_queryset)
-            monthly_transactions = monthly_sales_queryset.count()
-            monthly_gp = round((monthly_profit / monthly_revenue * 100), 1) if monthly_revenue > 0 else 0.0
-      
+            monthly_revenue = int(agg['total_revenue'] or 0)
+            monthly_transactions = int(agg['total_count'] or 0)
+
             sales_data.append({
                 'name': month_name,
                 '매출액': monthly_revenue,
-                '매출이익': monthly_profit,
-                'GP': monthly_gp,
-                '매출수량': monthly_quantity or (monthly_transactions * 50),  # 월련량 또는 추정량
-                '매출건수': monthly_transactions
+                '매출건수': monthly_transactions,
             })
-        
-        # 시간순으로 정렬 (최근 6개월 전부터 현재까지)
-        sales_data = list(reversed(sales_data))
-        
-        # 채널별 매출 비율 데이터 생성: 최근 6개월 SalesData의 '유통형태' 기준 매출금액 비중
-        from calendar import monthrange
-        try:
-            # 최근 6개월 기간 계산
-            latest_year, latest_month = current_year, current_month
-            earliest_dt = now
-            for i in range(5, -1, -1):
-                ty, tm = current_year, current_month - i
-                if tm <= 0:
-                    tm += 12
-                    ty -= 1
-                # 첫 월의 1일
-                if i == 5:
-                    earliest_dt = earliest_dt.replace(year=ty, month=tm, day=1)
-            start_date = earliest_dt.date()
-            end_date = now.replace(day=monthrange(current_year, current_month)[1]).date()
 
-            channel_qs = SalesData.objects.filter(매출일자__gte=start_date, 매출일자__lte=end_date)
-            if not has_global_view_access(user):
-                # 일반 사용자는 매출담당자 기준으로 필터링
-                channel_qs = channel_qs.annotate(
-                    매출담당자_norm=Replace('매출담당자', Value(' '), Value(''))
-                ).filter(
-                    Q(매출담당자_norm__icontains=normalized_name)
-                )
-            grouped = channel_qs.values('유통형태').annotate(
-                total=Sum('매출금액'),
-                profit=Sum('매출이익'),
-            ).order_by('-total')
-            total_sum = sum((row['total'] or 0) for row in grouped)
-            colors = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#AF19FF", "#00B8D9"]
-            channel_data = []
-            if total_sum > 0 and grouped:
-                for idx, row in enumerate(grouped):
-                    name = row['유통형태'] or '미지정'
-                    percent = round((row['total'] or 0) * 100 / total_sum)
-                    channel_data.append({
-                        'name': name,
-                        'value': percent,
-                        'color': colors[idx % len(colors)],
-                        'revenue': int(row['total'] or 0),
-                        'profit': int(row['profit'] or 0),
-                    })
-            else:
-                channel_data = [
-                    {'name': '미지정', 'value': 100, 'color': '#0088FE'}
-                ]
-        except Exception as e:
-            # 오류 발생 시 기본값 설정
-            channel_data = [
-                {'name': '미지정', 'value': 100, 'color': '#0088FE'}
-            ]
-        
+        # 시간순으로 정렬 (오래된 월 → 현재월)
+        sales_data = list(reversed(sales_data))
+
         # 최근 영업 활동 데이터
         recent_activities = []
         try:
             recent_reports = reports_queryset.order_by('-visitDate')[:4]
-            
             for report in recent_reports:
                 recent_activities.append({
                     'company': report.company_name or '알 수 없음',
@@ -1395,156 +1306,11 @@ def dashboard_charts_data_view(request):
                     'author': report.author.name if report.author else 'Unknown'
                 })
         except Exception as e:
-            # 오류 발생 시 기본값 설정
-            recent_activities = [
-                {'company': '데이터 없음', 'type': '대면', 'date': '2025-01-01', 'author': '시스템'}
-            ]
-        
-        # 축종별 매출 데이터 생성 (최근 6개월)
-        livestock_data = []
-        try:
-            # 최근 6개월 기간 계산
-            earliest_dt = now
-            for i in range(5, -1, -1):
-                ty, tm = current_year, current_month - i
-                if tm <= 0:
-                    tm += 12
-                    ty -= 1
-                if i == 5:
-                    earliest_dt = earliest_dt.replace(year=ty, month=tm, day=1)
-            start_date = earliest_dt.date()
-            end_date = now.replace(day=monthrange(current_year, current_month)[1]).date()
-            
-            # 각 월별로 축종별 데이터 집계
-            for i in range(6):
-                target_year = current_year
-                target_month = current_month - i
-                if target_month <= 0:
-                    target_month += 12
-                    target_year -= 1
-                
-                month_name = f"{target_month}월"
-                
-                # 해당 월의 매출 데이터 조회
-                monthly_sales = SalesData.objects.filter(
-                    매출일자__year=target_year,
-                    매출일자__month=target_month
-                )
-                
-                # 사용자별 필터링
-                normalized_name = (user.name or '').replace(' ', '') if hasattr(user, 'name') else ''
-                monthly_sales = monthly_sales.annotate(
-                    매출담당자_norm=Replace('매출담당자', Value(' '), Value(''))
-                )
-                if not has_global_view_access(user):
-                    monthly_sales = monthly_sales.filter(
-                        Q(매출담당자_norm__icontains=normalized_name)
-                    )
-                
-                # 축종별로 그룹화하여 집계
-                livestock_grouped = monthly_sales.values('축종').annotate(
-                    total_revenue=Sum('매출금액'),
-                    total_profit=Sum('매출이익')
-                )
-                
-                month_data = {'name': month_name}
-                for item in livestock_grouped:
-                    livestock_type = item['축종'] or '미지정'
-                    revenue = int(item['total_revenue'] or 0)
-                    profit = int(item['total_profit'] or 0)
-                    gp = round((profit / revenue * 100), 1) if revenue > 0 else 0.0
-                    month_data[f'{livestock_type}_매출액'] = revenue
-                    month_data[f'{livestock_type}_매출이익'] = profit
-                    month_data[f'{livestock_type}_GP'] = gp
-                
-                livestock_data.append(month_data)
-            
-            # 시간순으로 정렬
-            livestock_data = list(reversed(livestock_data))
-        except Exception as e:
-            print(f"[ERROR] 축종별 데이터 생성 중 오류: {str(e)}")
-            traceback.print_exc()
-            livestock_data = []
-        
-        # 팀별(매출부서별) 매출 데이터 생성 (최근 6개월)
-        team_data = []
-        try:
-            # 각 월별로 팀별 데이터 집계
-            for i in range(6):
-                target_year = current_year
-                target_month = current_month - i
-                if target_month <= 0:
-                    target_month += 12
-                    target_year -= 1
-                
-                month_name = f"{target_month}월"
-                
-                # 해당 월의 매출 데이터 조회
-                monthly_sales = SalesData.objects.filter(
-                    매출일자__year=target_year,
-                    매출일자__month=target_month
-                )
-                
-                # 사용자별 필터링
-                normalized_name = (user.name or '').replace(' ', '') if hasattr(user, 'name') else ''
-                monthly_sales = monthly_sales.annotate(
-                    매출담당자_norm=Replace('매출담당자', Value(' '), Value(''))
-                )
-                if not has_global_view_access(user):
-                    monthly_sales = monthly_sales.filter(
-                        Q(매출담당자_norm__icontains=normalized_name)
-                    )
-                
-                # 매출부서별로 그룹화하여 집계
-                team_grouped = monthly_sales.values('매출부서').annotate(
-                    total_revenue=Sum('매출금액'),
-                    total_profit=Sum('매출이익')
-                )
-                
-                month_data = {'name': month_name}
-                for item in team_grouped:
-                    team_name = item['매출부서'] or '미지정'
-                    # 팀명 정규화: 수도권1팀 → 가공장영업팀, 수도권2팀 → 도매영업팀
-                    normalized_team_name = team_name
-                    if team_name == '수도권1팀':
-                        normalized_team_name = '가공장영업팀'
-                    elif team_name == '수도권2팀':
-                        normalized_team_name = '도매영업팀'
-                    
-                    revenue = int(item['total_revenue'] or 0)
-                    profit = int(item['total_profit'] or 0)
-                    gp = round((profit / revenue * 100), 1) if revenue > 0 else 0.0
-                    
-                    # 정규화된 팀명으로 키 생성 (기존 팀명과 통합)
-                    base_key = normalized_team_name
-                    if base_key not in month_data or f'{base_key}_매출액' not in month_data:
-                        month_data[f'{base_key}_매출액'] = revenue
-                        month_data[f'{base_key}_매출이익'] = profit
-                        month_data[f'{base_key}_GP'] = gp
-                    else:
-                        # 이미 존재하는 경우 합산 (같은 팀의 다른 이름)
-                        month_data[f'{base_key}_매출액'] += revenue
-                        month_data[f'{base_key}_매출이익'] += profit
-                        # GP 재계산
-                        total_revenue = month_data[f'{base_key}_매출액']
-                        total_profit = month_data[f'{base_key}_매출이익']
-                        month_data[f'{base_key}_GP'] = round((total_profit / total_revenue * 100), 1) if total_revenue > 0 else 0.0
-                
-                team_data.append(month_data)
-            
-            # 시간순으로 정렬
-            team_data = list(reversed(team_data))
-        except Exception as e:
-            print(f"[ERROR] 팀별 데이터 생성 중 오류: {str(e)}")
-            traceback.print_exc()
-            team_data = []
-        
+            recent_activities = []
+
         return Response({
             'salesData': sales_data,
-            'channelData': channel_data,
             'recentActivities': recent_activities,
-            'livestockData': livestock_data,
-            'teamData': team_data
         }, status=status.HTTP_200_OK)
         
     except Exception as e:
@@ -1684,6 +1450,10 @@ def extract_keywords_view(request):
     - 태그/임베딩은 최초 1회만 캐싱, 속도 개선
     """
     try:
+        # 지연 로딩: KeyBERT와 sentence_transformers.util은 여기서만 import (PyTorch DLL 오류 방지)
+        from keybert import KeyBERT
+        from sentence_transformers import util
+        
         print("[키워드 추출 API] 요청 수신됨")
         text = request.data.get('text', '').strip()
         print(f"[키워드 추출 API] 입력 텍스트 길이: {len(text)}")
@@ -1908,12 +1678,12 @@ class CompanyFinancialStatusViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        # 회사 코드로 필터링 (company_code 또는 company_code_sap)
+        # 회사 코드로 필터링 (company_code 또는 company_code_erp)
         company_code = self.request.query_params.get('company__company_code', None)
-        company_code_sap = self.request.query_params.get('company__company_code_sap', None)
+        company_code_erp = self.request.query_params.get('company__company_code_erp', None)
         
         # 필터링 조건이 없으면 모든 데이터 반환
-        if not company_code and not company_code_sap:
+        if not company_code and not company_code_erp:
             return models.CompanyFinancialStatus.objects.all()
         
         queryset = models.CompanyFinancialStatus.objects.all()
@@ -1922,9 +1692,9 @@ class CompanyFinancialStatusViewSet(viewsets.ReadOnlyModelViewSet):
         if company_code:
             queryset = queryset.filter(company__company_code=company_code)
         
-        # company_code_sap로 필터링
-        if company_code_sap:
-            queryset = queryset.filter(company__company_code_sap=company_code_sap)
+        # company_code_erp로 필터링
+        if company_code_erp:
+            queryset = queryset.filter(company__company_code_erp=company_code_erp)
         
         return queryset
     
@@ -1948,29 +1718,18 @@ class SalesDataViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        user = self.request.user
-        if has_global_view_access(user):
-            # 관리자는 전체 데이터 접근 가능
-            queryset = SalesData.objects.all()
-        else:
-            # 일반 사용자는 본인 관련 데이터만 접근 가능
-            normalized_name = (user.name or '').replace(' ', '') if hasattr(user, 'name') else ''
-            queryset = SalesData.objects.all().annotate(
-                매출담당자_norm=Replace('매출담당자', Value(' '), Value(''))
-            ).filter(
-                Q(매출담당자_norm__icontains=normalized_name) |
-                Q(company_obj__employee_name__icontains=normalized_name)  # SalesData 모델의 company_obj는 유지됨
-            )
-        
+        # 모든 사용자가 전체 매출 현황 조회 가능
+        queryset = SalesData.objects.all()
+
         # 날짜 필터링
         start_date = self.request.query_params.get('start_date')
         end_date = self.request.query_params.get('end_date')
-        
+
         if start_date:
             queryset = queryset.filter(매출일자__gte=start_date)
         if end_date:
             queryset = queryset.filter(매출일자__lte=end_date)
-            
+
         return queryset.order_by('-매출일자')
 
 class ProspectCompanyViewSet(viewsets.ModelViewSet):
@@ -2224,9 +1983,10 @@ def download_companies_csv(request):
         writer.writerow([
             '회사코드', '회사명', '고객분류', '회사유형', '사업자등록번호', '설립일', '대표자명',
             '본사 주소', '시/구', '공장 주소', '대표전화', '업종명', '주요제품', '웹사이트', '참고사항',
-            # SAP정보
-            'SAP코드여부', 'SAP거래처코드', '사업', '사업부', '지점/팀', '팀명', '사원번호', '영업 사원',
-            '유통형태코드', '유통형태', '거래처 담당자', '담당자 연락처', '코드생성일', '거래시작일', '결제조건'
+            # ERP정보
+            'ERP코드여부', 'ERP거래처코드', '사업', '지점/팀', '사원번호', '영업 사원',
+            '유통형태코드', '유통형태', '거래처 담당자', '담당자 연락처', '등록일자', '거래시작일', '결제조건',
+            '매입단가', '매출단가'
         ])
         
         # 데이터 작성
@@ -2248,22 +2008,22 @@ def download_companies_csv(request):
                 company.products or '',
                 company.website or '',
                 company.remarks or '',
-                # SAP정보
-                company.sap_code_type or '',
-                company.company_code_sap or '',
+                # ERP정보
+                company.erp_code_type or '',
+                company.company_code_erp or '',
                 company.biz_code or '',
-                company.biz_name or '',
                 company.department_code or '',
-                company.department or '',
                 company.employee_number or '',
                 company.employee_name or '',
                 company.distribution_type_sap_code or '',
                 company.distribution_type_sap or '',
                 company.contact_person or '',
                 company.contact_phone or '',
-                company.code_create_date.strftime('%Y-%m-%d') if company.code_create_date else '',
+                company.registration_date.strftime('%Y-%m-%d') if company.registration_date else '',
                 company.transaction_start_date.strftime('%Y-%m-%d') if company.transaction_start_date else '',
                 company.payment_terms or '',
+                company.purchase_unit_price or '',
+                company.sale_unit_price or '',
             ])
         
         # 다운로드 로그 기록
@@ -2529,22 +2289,22 @@ def upload_companies_csv(request):
                         'products': safe_get_value(row, '주요제품'),
                         'website': safe_get_value(row, '웹사이트'),
                         'remarks': safe_get_value(row, '참고사항'),
-                        # SAP정보
-                        'sap_code_type': safe_get_value(row, 'SAP코드여부'),
-                        'company_code_sap': safe_get_value(row, 'SAP거래처코드'),
+                        # ERP정보
+                        'erp_code_type': safe_get_value(row, 'ERP코드여부'),
+                        'company_code_erp': safe_get_value(row, 'ERP거래처코드'),
                         'biz_code': safe_get_value(row, '사업'),
-                        'biz_name': safe_get_value(row, '사업부'),
                         'department_code': safe_get_value(row, '지점/팀'),
-                        'department': safe_get_value(row, '팀명'),
                         'employee_number': safe_get_value(row, '사원번호'),
                         'employee_name': safe_get_value(row, '영업 사원'),
                         'distribution_type_sap_code': safe_get_value(row, '유통형태코드'),
                         'distribution_type_sap': safe_get_value(row, '유통형태'),
                         'contact_person': safe_get_value(row, '거래처 담당자'),
                         'contact_phone': safe_get_value(row, '담당자 연락처'),
-                        'code_create_date': safe_get_date(row, '코드생성일'),
+                        'registration_date': safe_get_date(row, '등록일자'),
                         'transaction_start_date': safe_get_date(row, '거래시작일'),
                         'payment_terms': safe_get_value(row, '결제조건'),
+                        'purchase_unit_price': safe_get_value(row, '매입단가'),
+                        'sale_unit_price': safe_get_value(row, '매출단가'),
                     }
                 )
                 
@@ -2765,8 +2525,8 @@ def upload_prospect_companies_csv(request):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
-def upload_companies_sap_tsv(request):
-    """SAP 거래처 정보 TSV 파일을 업로드하여 기존 거래처 업데이트 또는 신규 거래처 추가"""
+def upload_companies_erp_tsv(request):
+    """ERP 거래처 정보 TSV 파일(거래처현황.tsv)을 업로드하여 기존 거래처 업데이트 또는 신규 거래처 추가"""
     try:
         # 관리자 권한 확인
         if not hasattr(request.user, 'role') or request.user.role != 'admin':
@@ -2789,8 +2549,8 @@ def upload_companies_sap_tsv(request):
         except Exception as e:
             return Response({'error': f'TSV 파일 읽기 오류: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
         
-        # 필수 컬럼 확인
-        required_columns = ['고객', '고객번호1']
+        # 필수 컬럼 확인 (거래처현황.tsv 포맷)
+        required_columns = ['코드', '거래처명']
         missing_columns = [col for col in required_columns if col not in df.columns]
         if missing_columns:
             return Response({'error': f'파일에 필요한 컬럼이 없습니다: {", ".join(missing_columns)}'}, status=status.HTTP_400_BAD_REQUEST)
@@ -2806,175 +2566,136 @@ def upload_companies_sap_tsv(request):
                 return value if value else None
             return default
         
+        def safe_get_int(row, col_name):
+            """정수 컬럼 안전하게 가져오기"""
+            val = safe_get_value(row, col_name)
+            if val is None:
+                return None
+            try:
+                return int(str(val).replace(',', '').strip())
+            except (ValueError, TypeError):
+                return None
+        
         def safe_get_date(row, col_name):
-            """날짜 필드 안전하게 가져오기"""
+            """날짜 필드 안전하게 가져오기 (YYYY.MM.DD, YYYY-MM-DD, YYYYMMDD 지원)"""
             if col_name in df.columns and pd.notna(row[col_name]):
                 try:
                     value = str(row[col_name]).strip()
-                    if not value:
+                    if not value or value in ['0000.00.00', '']:
                         return None
-                    # 다양한 날짜 형식 시도
-                    if len(value) == 10 and '-' in value:
-                        return pd.to_datetime(value).date()
-                    elif len(value) == 8:  # YYYYMMDD 형식
-                        return pd.to_datetime(value, format='%Y%m%d').date()
-                    else:
-                        return pd.to_datetime(value).date()
-                except:
+                    value = value.replace('.', '-')
+                    return pd.to_datetime(value).date()
+                except Exception:
                     return None
             return None
         
-        def extract_city_district(address):
-            """주소에서 시/구 부분 추출 (예: '서울특별시 강남구', '경기도 수원시 팔달구' 형식)"""
-            if not address:
-                return None
-            # 한국 주소 형식: 시/도 시/군/구 ...
-            import re
-            # 패턴 1: 시/도 + 시 + 구 (예: 경기도 수원시 팔달구, 경기도 안양시 동안구, 경기도 용인특례시 기흥구)
-            match = re.match(r'^([가-힣]+(?:특별시|광역시|도|특별자치시|특별자치도))\s+([가-힣]+(?:특례시|시))\s+([가-힣]+(?:구|군))', address)
-            if match:
-                return f"{match.group(1)} {match.group(2)} {match.group(3)}"
-            # 패턴 2: 시/도 + 구/군/시 (예: 서울특별시 강남구, 경기도 수원시)
-            match = re.match(r'^([가-힣]+(?:특별시|광역시|도|특별자치시|특별자치도))\s+([가-힣]+(?:구|군|시))', address)
-            if match:
-                return f"{match.group(1)} {match.group(2)}"
-            # 패턴 3: 시/도만 있는 경우 (예: 세종특별자치시)
-            match = re.match(r'^([가-힣]+(?:특별시|광역시|도|특별자치시|특별자치도))', address)
-            if match:
-                return match.group(1)
+        def build_erp_code_type(매입_val, 매출_val):
+            """매입/매출 Y/N 컬럼으로 erp_code_type 결정"""
+            is_매입 = str(매입_val or '').strip().upper() in ('Y', '예', '1', 'TRUE')
+            is_매출 = str(매출_val or '').strip().upper() in ('Y', '예', '1', 'TRUE')
+            if is_매입 and is_매출:
+                return '매입매출'
+            elif is_매입:
+                return '매입'
+            elif is_매출:
+                return '매출'
             return None
         
         for index, row in df.iterrows():
             try:
-                # 필수 필드 추출
-                customer_code = safe_get_value(row, '고객')  # company_code_sap와 매칭
-                company_name = safe_get_value(row, '고객번호1')  # 회사명
-                tax_id_value = safe_get_value(row, '사업자등록번호')  # tax_id와 매칭
+                company_code_val = safe_get_value(row, '코드')
+                company_name = safe_get_value(row, '거래처명') or safe_get_value(row, '거래처상호')
+                tax_id_value = safe_get_value(row, '사업자번호')
                 
                 if not company_name:
-                    errors.append(f"행 {index + 2}: 회사명(고객번호1)이 없습니다.")
+                    errors.append(f"행 {index + 2}: 거래처명이 없습니다.")
                     continue
                 
-                # 매칭 로직: company_code_sap 먼저, 없으면 tax_id로 매칭
-                company = None
-                is_sap_code_new = False  # SAP코드가 처음 입력되는지 여부
-                if customer_code:
-                    # company_code_sap로 매칭 시도
-                    company = Company.objects.filter(company_code_sap=customer_code).first()
+                # ERP코드여부 결정 (매입/매출 Y/N 컬럼 조합)
+                erp_code_type_val = build_erp_code_type(
+                    safe_get_value(row, '매입'),
+                    safe_get_value(row, '매출')
+                )
                 
-                if not company and tax_id_value:
-                    # tax_id로 매칭 시도
-                    company = Company.objects.filter(tax_id=tax_id_value).first()
-                    # 사업자등록번호로 매칭된 경우, 기존에 company_code_sap가 없었다면 SAP코드가 처음 입력되는 것
-                    if company and not company.company_code_sap and customer_code:
-                        is_sap_code_new = True
-                
-                # 필드 매핑 데이터 준비
+                # 필드 매핑 데이터 준비 (거래처현황.tsv → Company 모델)
                 update_data = {
                     'company_name': company_name,
-                    # SAP 정보
-                    'company_code_sap': customer_code,
-                    'biz_code': safe_get_value(row, '사업'),
-                    'biz_name': safe_get_value(row, '사업부'),
-                    'department_code': safe_get_value(row, '지점/팀'),
-                    'department': safe_get_value(row, '내역'),
-                    'employee_number': safe_get_value(row, '사원번호'),
-                    'employee_name': safe_get_value(row, '사원명'),
-                    'distribution_type_sap_code': safe_get_value(row, '유통형태(소)'),
-                    'distribution_type_sap': safe_get_value(row, '유통형태(소)명'),
-                    'contact_person': safe_get_value(row, '계약담당자명'),
-                    'contact_phone': safe_get_value(row, '계약담당연락처'),
-                    'code_create_date': safe_get_date(row, '생성일'),
-                    'transaction_start_date': safe_get_date(row, '거래개시일'),
-                    'payment_terms': safe_get_value(row, '지급조건의 고유설명'),
                     'tax_id': tax_id_value,
+                    'ceo_name': safe_get_value(row, '대표자성명'),
+                    'head_address': safe_get_value(row, '본사주소'),
+                    'main_phone': safe_get_value(row, '본사전화번호'),
+                    'industry_name': safe_get_value(row, '업태') or safe_get_value(row, '업종분류'),
+                    'products': safe_get_value(row, '주생산품목명'),
+                    'remarks': safe_get_value(row, '비고'),
+                    'company_type': safe_get_value(row, '개인법인구분'),
+                    'payment_terms': safe_get_value(row, '결재방법'),
+                    'contact_person': safe_get_value(row, '업체담당'),
+                    'contact_phone': safe_get_value(row, '담당자전화'),
+                    'employee_name': safe_get_value(row, '자사담당'),
+                    'registration_date': safe_get_date(row, '등록일자'),
+                    'purchase_unit_price': safe_get_int(row, '매입단가'),
+                    'sale_unit_price': safe_get_int(row, '매출단가'),
                 }
+                if erp_code_type_val:
+                    update_data['erp_code_type'] = erp_code_type_val
                 
-                # 주소 정보 처리
-                city = safe_get_value(row, '도시')
-                detail_address = safe_get_value(row, '상세주소')
+                # 주소에서 city_district 추출
+                head_addr = update_data.get('head_address')
+                if head_addr:
+                    import re
+                    m = re.match(r'^([가-힣]+(?:특별시|광역시|도|특별자치시|특별자치도))\s+([가-힣]+(?:특례시|시))\s+([가-힣]+(?:구|군))', head_addr)
+                    if m:
+                        update_data['city_district'] = f"{m.group(1)} {m.group(2)} {m.group(3)}"
+                    else:
+                        m = re.match(r'^([가-힣]+(?:특별시|광역시|도|특별자치시|특별자치도))\s+([가-힣]+(?:구|군|시))', head_addr)
+                        if m:
+                            update_data['city_district'] = f"{m.group(1)} {m.group(2)}"
+                
+                # 매칭 로직: 코드(company_code) → tax_id 순서
+                company = None
+                is_erp_code_new = False
+                if company_code_val:
+                    company = Company.objects.filter(company_code=company_code_val).first()
+                    if not company:
+                        company = Company.objects.filter(company_code_erp=company_code_val).first()
+                
+                if not company and tax_id_value:
+                    company = Company.objects.filter(tax_id=tax_id_value).first()
+                    if company and not company.company_code_erp and company_code_val:
+                        is_erp_code_new = True
+                        update_data['company_code_erp'] = company_code_val
                 
                 if company:
                     # 기존 회사 업데이트
-                    # 주소 정보 (있는 경우)
-                    if city and detail_address:
-                        update_data['head_address'] = f"{city}, {detail_address}"
-                        update_data['city_district'] = extract_city_district(update_data['head_address'])
-                    elif detail_address:
-                        update_data['head_address'] = detail_address
-                        update_data['city_district'] = extract_city_district(detail_address)
-                    elif city:
-                        update_data['head_address'] = city
-                        update_data['city_district'] = extract_city_district(city)
-                    
-                    # 대표자명
-                    ceo_name = safe_get_value(row, '대표자명')
-                    if ceo_name:
-                        update_data['ceo_name'] = ceo_name
-                    
-                    # 전화번호
-                    phone = safe_get_value(row, '전화번호 1')
-                    if phone:
-                        update_data['main_phone'] = phone
-                    
-                    # 사업자등록번호로 매칭되어 SAP코드를 처음 입력하는 경우
-                    if is_sap_code_new:
-                        code_create_date = update_data.get('code_create_date')
-                        if code_create_date:
-                            from datetime import date
-                            today = date.today()
-                            days_diff = (today - code_create_date).days
-                            if days_diff <= 90:  # 3개월 이내
-                                update_data['customer_classification'] = '신규'
-                            else:  # 3개월 초과
-                                update_data['customer_classification'] = '기존'
+                    if is_erp_code_new:
+                        reg_date = update_data.get('registration_date')
+                        if reg_date:
+                            from datetime import date as _date
+                            days_diff = (_date.today() - reg_date).days
+                            update_data['customer_classification'] = '신규' if days_diff <= 90 else '기존'
                         else:
                             update_data['customer_classification'] = '기존'
-                        update_data['sap_code_type'] = '매출'
                     
-                    # 업데이트 실행
                     for key, value in update_data.items():
                         if value is not None:
                             setattr(company, key, value)
                     company.save()
                     updated_count += 1
                 else:
-                    # 신규 회사 생성
-                    # company_code 자동 생성: C{next_num:07d} 형식
-                    last_code = Company.objects.filter(company_code__startswith='C').aggregate(
-                        max_code=Max('company_code')
-                    )['max_code']
-                    if last_code and last_code[1:].isdigit():
-                        next_num = int(last_code[1:]) + 1
+                    # 신규 회사 생성: company_code는 TSV의 코드 컬럼 사용, 없으면 자동 생성
+                    if company_code_val:
+                        update_data['company_code'] = company_code_val
+                        update_data['company_code_erp'] = company_code_val
                     else:
-                        next_num = 1
-                    new_code = f'C{next_num:07d}'
+                        last_code = Company.objects.filter(company_code__startswith='C').aggregate(
+                            max_code=Max('company_code')
+                        )['max_code']
+                        next_num = (int(last_code[1:]) + 1) if (last_code and last_code[1:].isdigit()) else 1
+                        update_data['company_code'] = f'C{next_num:07d}'
                     
-                    update_data['company_code'] = new_code
-                    # 신규 등록 시 고객 구분과 SAP코드여부 설정
                     update_data['customer_classification'] = '신규'
-                    update_data['sap_code_type'] = '매출'
-                    
-                    # 주소 정보 처리 (신규 등록)
-                    if city and detail_address:
-                        update_data['head_address'] = f"{city}, {detail_address}"
-                        update_data['city_district'] = extract_city_district(update_data['head_address'])
-                    elif detail_address:
-                        update_data['head_address'] = detail_address
-                        update_data['city_district'] = extract_city_district(detail_address)
-                    elif city:
-                        update_data['head_address'] = city
-                        update_data['city_district'] = extract_city_district(city)
-                    
-                    # 대표자명
-                    ceo_name = safe_get_value(row, '대표자명')
-                    if ceo_name:
-                        update_data['ceo_name'] = ceo_name
-                    
-                    # 전화번호 (전화번호 1 사용)
-                    phone = safe_get_value(row, '전화번호 1')
-                    if phone:
-                        update_data['main_phone'] = phone
+                    if erp_code_type_val:
+                        update_data['erp_code_type'] = erp_code_type_val
                     
                     Company.objects.create(**update_data)
                     created_count += 1
@@ -2984,14 +2705,14 @@ def upload_companies_sap_tsv(request):
                 continue
         
         return Response({
-            'message': f'SAP 거래처 업로드 완료: {created_count}개 생성, {updated_count}개 업데이트',
+            'message': f'ERP 거래처 업로드 완료: {created_count}개 생성, {updated_count}개 업데이트',
             'created_count': created_count,
             'updated_count': updated_count,
-            'errors': errors[:10]  # 최대 10개 오류만 반환
+            'errors': errors[:10]
         })
         
     except Exception as e:
-        logging.error(f'SAP 거래처 TSV 업로드 오류: {e}')
+        logging.error(f'ERP 거래처 TSV 업로드 오류: {e}')
         return Response({'error': f'업로드 중 오류가 발생했습니다: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['POST'])
@@ -3071,12 +2792,16 @@ def upload_sales_data_csv(request):
             months_to_overwrite = set()
             for temp_row in csv_reader:
                 try:
-                    if not temp_row.get('매출일자', '').strip():
+                    # 요약 행 제외
+                    거래처약칭_tmp = str(temp_row.get('거래처약칭', '') or '').strip()
+                    if 거래처약칭_tmp in ('품목계:', '총  계:', '총계:'):
                         continue
-                    temp_dt = pd.to_datetime(temp_row['매출일자']).date()
+                    date_raw = str(temp_row.get('출하일자', '') or '').strip()
+                    if not date_raw:
+                        continue
+                    temp_dt = pd.to_datetime(date_raw.replace('.', '-')).date()
                     months_to_overwrite.add((temp_dt.year, temp_dt.month))
                 except Exception:
-                    # 날짜 파싱 실패 행은 삭제 범위 계산에서 제외
                     continue
             deleted_total = 0
             for y, m in months_to_overwrite:
@@ -3092,214 +2817,126 @@ def upload_sales_data_csv(request):
         
         for row_num, row in enumerate(csv_reader, start=2):  # 헤더가 1행이므로 2부터 시작
             try:
-                # 원본 행 데이터 저장 (디버깅용)
-                original_map = dict(row)
+                # 요약 행 필터링 (거래처약칭 컬럼이 '품목계:', '총  계:' 등인 행)
+                거래처약칭_val = str(row.get('거래처약칭', '') or '').strip()
+                if 거래처약칭_val in ('품목계:', '총  계:', '총계:'):
+                    skipped_count += 1
+                    continue
                 
-                # 거래처명 처리 (없으면 기본값 사용)
-                거래처명 = row.get('거래처명', '').strip()
+                # 출하일자 → 매출일자 파싱 (필수 필드)
+                매출일자 = None
+                date_raw = str(row.get('출하일자', '') or '').strip()
+                if date_raw:
+                    try:
+                        매출일자 = pd.to_datetime(date_raw.replace('.', '-')).date()
+                    except Exception:
+                        skipped_reasons['invalid_sale_date'] += 1
+                        errors.append(f"{row_num}행: 출하일자 형식 오류 ({date_raw}), 오늘 날짜로 처리합니다.")
+                        매출일자 = date.today()
+                else:
+                    skipped_reasons['no_sale_date'] += 1
+                    errors.append(f"{row_num}행: 출하일자가 없어 오늘 날짜로 처리합니다.")
+                    매출일자 = date.today()
+                
+                # 거래처명 (거래처명칭 컬럼 사용)
+                거래처명 = str(row.get('거래처명칭', '') or row.get('거래처명', '') or '').strip()
                 if not 거래처명:
                     거래처명 = f"미지정거래처_{row_num}"
                     skipped_reasons['no_customer_name'] += 1
                 
-                # 매출일자 파싱 (필수 필드, 없으면 오늘 날짜 사용)
-                매출일자 = None
-                if row.get('매출일자', '').strip():
-                    try:
-                        매출일자 = pd.to_datetime(row['매출일자']).date()
-                    except:
-                        try:
-                            # 다양한 날짜 형식 시도
-                            매출일자 = pd.to_datetime(row['매출일자'], errors='coerce').date()
-                            if pd.isna(매출일자) or 매출일자 is None:
-                                skipped_reasons['invalid_sale_date'] += 1
-                                errors.append(f"{row_num}행: 매출일자 형식이 올바르지 않아 오늘 날짜로 처리합니다. ({row.get('매출일자', '')})")
-                                매출일자 = date.today()
-                        except:
-                            skipped_reasons['invalid_sale_date'] += 1
-                            errors.append(f"{row_num}행: 매출일자 형식이 올바르지 않아 오늘 날짜로 처리합니다. ({row.get('매출일자', '')})")
-                            매출일자 = date.today()
-                else:
-                    skipped_reasons['no_sale_date'] += 1
-                    errors.append(f"{row_num}행: 매출일자가 없어 오늘 날짜로 처리합니다.")
-                    매출일자 = date.today()
-                
-                # 매출금액 파싱 (필수 필드, 없으면 0으로 처리)
+                # 합계금액 → 매출금액 파싱 (필수 필드)
                 매출금액 = 0
-                매출금액_raw = row.get('매출금액', '')
-                # pandas NaN 체크
-                if 매출금액_raw and not pd.isna(매출금액_raw) and str(매출금액_raw).strip():
+                합계금액_raw = row.get('합계금액', '') or row.get('매출금액', '')
+                if 합계금액_raw and str(합계금액_raw).strip() not in ('', 'nan', 'none', 'null', 'nat'):
                     try:
-                        매출금액_str = str(매출금액_raw).replace(',', '').replace(' ', '').strip()
-                        # NaN 문자열 체크
-                        if 매출금액_str.lower() not in ['nan', 'none', '', 'null', 'nat'] and 매출금액_str:
-                            매출금액_float = float(매출금액_str)
-                            # NaN, Infinity 체크
-                            if not pd.isna(매출금액_float) and not np.isnan(매출금액_float) and not np.isinf(매출금액_float):
-                                매출금액 = int(매출금액_float)
-                            else:
-                                raise ValueError("매출금액이 NaN 또는 Infinity입니다")
+                        매출금액_str = str(합계금액_raw).replace(',', '').replace(' ', '').strip()
+                        if 매출금액_str:
+                            매출금액 = int(float(매출금액_str))
                     except Exception as e:
                         skipped_reasons['invalid_sale_amount'] += 1
-                        errors.append(f"{row_num}행: 매출금액 형식이 올바르지 않습니다. ({row.get('매출금액', '')}) - {str(e)}")
-                        # 오류가 있어도 0으로 처리하고 계속 진행
+                        errors.append(f"{row_num}행: 합계금액 형식 오류 ({합계금액_raw}) - {str(e)}")
                         매출금액 = 0
                 else:
                     skipped_reasons['no_sale_amount'] += 1
-                    errors.append(f"{row_num}행: 매출금액이 없어 0으로 처리합니다.")
                     매출금액 = 0
-                # 추가 수치 파싱: 매출이익, 매입금액, 매출단가, 매입단가, 이익율
                 def parse_int_safe(val):
                     try:
-                        # pandas NaN, numpy nan, None 등 먼저 체크
                         if val is None or pd.isna(val) or str(val).strip() == '':
                             return None
                         s = str(val).replace(',', '').replace(' ', '').strip()
-                        # NaN, nan, None 등 처리
-                        if s.lower() in ['nan', 'none', '', 'null', 'none', 'nat']:
+                        if s.lower() in ['nan', 'none', '', 'null', 'nat']:
                             return None
-                        if s == '':
-                            return None
-                        # 숫자 변환 시도
                         result = int(float(s))
-                        # 변환 후에도 NaN 체크 (float('nan') -> int 변환 시 오류 가능)
                         if pd.isna(result) or np.isnan(result):
                             return None
                         return result
-                    except (ValueError, TypeError, OverflowError):
-                        return None
                     except Exception:
                         return None
 
                 def parse_float_safe(val):
                     try:
-                        # pandas NaN, numpy nan, None 등 먼저 체크
                         if val is None or pd.isna(val) or str(val).strip() == '':
                             return None
-                        s = str(val).replace('%', '').replace(',', '').replace(' ', '').strip()
-                        # NaN, nan, None 등 처리
-                        if s.lower() in ['nan', 'none', '', 'null', 'none', 'nat']:
+                        s = str(val).replace(',', '').replace(' ', '').strip()
+                        if s.lower() in ['nan', 'none', '', 'null', 'nat']:
                             return None
-                        if s == '':
-                            return None
-                        # 숫자 변환 시도
                         result = float(s)
-                        # 변환 후에도 NaN 체크
                         if pd.isna(result) or np.isnan(result) or np.isinf(result):
                             return None
                         return result
-                    except (ValueError, TypeError, OverflowError):
-                        return None
                     except Exception:
                         return None
 
-                # 모든 숫자 필드 파싱 및 검증
-                매출이익_val = parse_int_safe(row.get('매출이익'))
-                매입금액_val = parse_int_safe(row.get('매입금액'))
-                매출단가_val = parse_int_safe(row.get('매출단가'))
-                매입단가_val = parse_int_safe(row.get('매입단가'))
-                이익율_val = parse_float_safe(row.get('이익율'))
-                
-                # 매출이익이 없고 매입금액이 있으면 계산: 매출금액 - 매입금액
-                if 매출이익_val is None and 매입금액_val is not None:
-                    매출이익_val = 매출금액 - 매입금액_val
+                def parse_bigint_safe(val):
+                    """큰 정수 안전 파싱"""
+                    return parse_int_safe(val)
 
-                # 이익율이 없으면 계산
-                if 이익율_val is None and 매출이익_val is not None and 매출금액:
+                # 새 매출현황.tsv 필드 파싱
+                코드값 = str(row.get('코드', '') or '').strip() or None
+                건수_val = parse_int_safe(row.get('건수'))
+                수량_val = parse_float_safe(row.get('수량'))
+                중량_val = parse_float_safe(row.get('중량'))
+                출고단가_val = parse_int_safe(row.get('출고단가'))
+                공급가액_val = parse_bigint_safe(row.get('공급가액'))
+                부가세액_val = parse_bigint_safe(row.get('부가세액'))
+
+                # 문자열 필드 안전 처리
+                def _s(val, max_len=None):
+                    if val is None:
+                        return None
                     try:
-                        이익율_val = round((매출이익_val / 매출금액) * 100, 2)
+                        if pd.isna(val):
+                            return None
+                        v = str(val).strip()
+                        if v.lower() in ('nan', 'none', 'null', 'nat', ''):
+                            return None
+                        return v[:max_len] if max_len and len(v) > max_len else v
                     except Exception:
-                        이익율_val = None
-                
-                # Box 파싱 (있는 경우만)
-                Box = None
-                box_val = row.get('Box', '')
-                if box_val and not pd.isna(box_val) and str(box_val).strip():
-                    try:
-                        box_str = str(box_val).replace(',', '').replace(' ', '').strip()
-                        # NaN, nan, None 등 처리
-                        if box_str.lower() not in ['nan', 'none', '', 'null', 'nat'] and box_str:
-                            box_result = int(float(box_str))
-                            # NaN 체크
-                            if not pd.isna(box_result) and not np.isnan(box_result):
-                                Box = box_result
-                    except:
-                        Box = None
-                
-                # 중량 파싱 (있는 경우만)
-                중량_Kg = None
-                weight_val = row.get('중량(Kg)', '')
-                if weight_val and not pd.isna(weight_val) and str(weight_val).strip():
-                    try:
-                        weight_str = str(weight_val).replace(',', '').replace(' ', '').strip()
-                        # NaN, nan, None 등 처리
-                        if weight_str.lower() not in ['nan', 'none', '', 'null', 'nat'] and weight_str:
-                            weight_result = float(weight_str)
-                            # NaN, Infinity 체크
-                            if not pd.isna(weight_result) and not np.isnan(weight_result) and not np.isinf(weight_result):
-                                중량_Kg = weight_result
-                    except:
-                        중량_Kg = None
-                
-                # 매입일자 파싱 (있는 경우만)
-                매입일자 = None
-                if row.get('매입일자', '').strip():
-                    try:
-                        매입일자 = pd.to_datetime(row['매입일자']).date()
-                    except:
-                        pass
-                
-                # 재고보유일 파싱 (있는 경우만)
-                재고보유일 = None
-                재고보유일_val = row.get('재고보유일', '')
-                if 재고보유일_val and not pd.isna(재고보유일_val):
-                    재고보유일_str = str(재고보유일_val).strip().replace(',', '').replace(' ', '')
-                    if 재고보유일_str and 재고보유일_str.lower() not in ['nan', 'none', 'null', 'nat']:
-                        try:
-                            재고보유일_float = float(재고보유일_str)
-                            if not pd.isna(재고보유일_float) and not np.isnan(재고보유일_float):
-                                재고보유일 = int(재고보유일_float)
-                        except Exception:
-                            재고보유일 = None
-                
-                # 타입 최종 검증 및 정리 (모든 파싱 완료 후)
-                # NaN 값 체크 및 None 변환
-                if 매출이익_val is not None:
-                    if pd.isna(매출이익_val) or np.isnan(매출이익_val) or not isinstance(매출이익_val, (int, float)):
-                        try:
-                            if pd.isna(매출이익_val) or np.isnan(매출이익_val):
-                                매출이익_val = None
-                            elif isinstance(매출이익_val, (float, int)):
-                                매출이익_val = int(매출이익_val) if not pd.isna(매출이익_val) else None
-                            else:
-                                매출이익_val = None
-                        except Exception:
-                            매출이익_val = None
+                        return None
 
-                if 매입금액_val is not None:
-                    if pd.isna(매입금액_val) or np.isnan(매입금액_val) or not isinstance(매입금액_val, (int, float)):
-                        try:
-                            if pd.isna(매입금액_val) or np.isnan(매입금액_val):
-                                매입금액_val = None
-                            elif isinstance(매입금액_val, (float, int)):
-                                매입금액_val = int(매입금액_val) if not pd.isna(매입금액_val) else None
-                            else:
-                                매입금액_val = None
-                        except Exception:
-                            매입금액_val = None
+                SalesData.objects.create(
+                    매출일자=매출일자,
+                    코드=_s(코드값, 50),
+                    거래처명=거래처명,
+                    거래처약칭=_s(거래처약칭_val, 200),
+                    품목코드=_s(row.get('품목코드'), 100),
+                    품목약칭=_s(row.get('품목약칭'), 200),
+                    품목명칭=_s(row.get('품목명칭'), 200),
+                    단위=_s(row.get('단위'), 20),
+                    규격=_s(row.get('규격'), 50),
+                    건수=건수_val,
+                    수량=수량_val,
+                    중량=중량_val,
+                    출고단가=출고단가_val,
+                    공급가액=공급가액_val,
+                    부가세액=부가세액_val,
+                    매출금액=매출금액,
+                    보관방법=_s(row.get('보관방법'), 100),
+                    소비기간=_s(row.get('소비기간'), 50),
+                )
+                created_count += 1
 
-                if 매출단가_val is not None:
-                    if pd.isna(매출단가_val) or np.isnan(매출단가_val) or not isinstance(매출단가_val, (int, float)):
-                        try:
-                            if pd.isna(매출단가_val) or np.isnan(매출단가_val):
-                                매출단가_val = None
-                            elif isinstance(매출단가_val, (float, int)):
-                                매출단가_val = int(매출단가_val) if not pd.isna(매출단가_val) else None
-                            else:
-                                매출단가_val = None
-                        except Exception:
-                            매출단가_val = None
-
-                if 매입단가_val is not None:
+                if False and 매입단가_val is not None:
                     if pd.isna(매입단가_val) or np.isnan(매입단가_val) or not isinstance(매입단가_val, (int, float)):
                         try:
                             if pd.isna(매입단가_val) or np.isnan(매입단가_val):
@@ -4046,64 +3683,51 @@ def get_company_unique_products(request, company_id):
         # 디버깅 정보 출력
         print(f"[get_company_unique_products] 회사 정보:")
         print(f"  - company_code: {company.company_code}")
-        print(f"  - company_code_sap: {company.company_code_sap}")
+        print(f"  - company_code_erp: {company.company_code_erp}")
         print(f"  - company_name: {company.company_name}")
         
-        # 방법 1: SAP 회사 코드로 매칭 (가장 정확한 방법 - 우선순위 1)
-        if company.company_code_sap:
+        # 방법 1: ERP 회사 코드로 매칭 (가장 정확한 방법 - 우선순위 1)
+        if company.company_code_erp:
             try:
-                print(f"[get_company_unique_products] 방법 1 시도: company_code_sap='{company.company_code_sap}'로 SalesData 검색")
-                sales_data_qs = SalesData.objects.filter(코드=company.company_code_sap)
+                print(f"[get_company_unique_products] 방법 1 시도: company_code_erp='{company.company_code_erp}'로 SalesData 검색")
+                sales_data_qs = SalesData.objects.filter(코드=company.company_code_erp)
                 count = sales_data_qs.count()
                 print(f"[get_company_unique_products] 방법 1 결과: {count}개 데이터 발견")
                 if count > 0:
-                    matched_by = 'sap_code'
+                    matched_by = 'erp_code'
             except Exception as e:
                 print(f"[get_company_unique_products] 방법 1 오류: {str(e)}")
                 print(traceback.format_exc())
         
-        # 방법 2: company_obj로 직접 연결된 데이터 (우선순위 2)
-        if not sales_data_qs.exists():
+        # 방법 2: 회사 코드로 매칭 (우선순위 2)
+        if not sales_data_qs.exists() and company.company_code:
             try:
-                print(f"[get_company_unique_products] 방법 2 시도: company_obj로 SalesData 검색")
-                sales_data_qs = SalesData.objects.filter(company_obj=company)
+                print(f"[get_company_unique_products] 방법 2 시도: company_code='{company.company_code}'로 SalesData 검색")
+                sales_data_qs = SalesData.objects.filter(코드=company.company_code)
                 count = sales_data_qs.count()
                 print(f"[get_company_unique_products] 방법 2 결과: {count}개 데이터 발견")
                 if count > 0:
-                    matched_by = 'company_obj'
+                    matched_by = 'company_code'
             except Exception as e:
                 print(f"[get_company_unique_products] 방법 2 오류: {str(e)}")
                 print(traceback.format_exc())
         
-        # 방법 3: 회사 코드로 매칭 (우선순위 3)
-        if not sales_data_qs.exists() and company.company_code:
+        # 방법 3: 거래처명으로 매칭 (우선순위 3)
+        if not sales_data_qs.exists() and company.company_name:
             try:
-                print(f"[get_company_unique_products] 방법 3 시도: company_code='{company.company_code}'로 SalesData 검색")
-                sales_data_qs = SalesData.objects.filter(코드=company.company_code)
+                print(f"[get_company_unique_products] 방법 3 시도: 거래처명='{company.company_name}'로 SalesData 검색")
+                sales_data_qs = SalesData.objects.filter(거래처명__icontains=company.company_name)
                 count = sales_data_qs.count()
                 print(f"[get_company_unique_products] 방법 3 결과: {count}개 데이터 발견")
                 if count > 0:
-                    matched_by = 'company_code'
+                    matched_by = 'company_name'
             except Exception as e:
                 print(f"[get_company_unique_products] 방법 3 오류: {str(e)}")
                 print(traceback.format_exc())
         
-        # 방법 4: 거래처명으로 매칭 (우선순위 4)
-        if not sales_data_qs.exists() and company.company_name:
-            try:
-                print(f"[get_company_unique_products] 방법 4 시도: 거래처명='{company.company_name}'로 SalesData 검색")
-                sales_data_qs = SalesData.objects.filter(거래처명__icontains=company.company_name)
-                count = sales_data_qs.count()
-                print(f"[get_company_unique_products] 방법 4 결과: {count}개 데이터 발견")
-                if count > 0:
-                    matched_by = 'company_name'
-            except Exception as e:
-                print(f"[get_company_unique_products] 방법 4 오류: {str(e)}")
-                print(traceback.format_exc())
-        
-        # 유니크한 상품명 조회
+        # 유니크한 품목명칭 조회
         try:
-            unique_products = sales_data_qs.values_list('상품명', flat=True).distinct()
+            unique_products = sales_data_qs.values_list('품목명칭', flat=True).distinct()
             
             # None 값 제거 및 필터링
             products = [p for p in unique_products if p and p.strip()]
@@ -4114,14 +3738,14 @@ def get_company_unique_products(request, company_id):
                 'matched_by': matched_by or 'none'
             }, status=status.HTTP_200_OK)
         except Exception as e:
-            print(f"[get_company_unique_products] 상품명 조회 오류: {str(e)}")
+            print(f"[get_company_unique_products] 품목명칭 조회 오류: {str(e)}")
             print(traceback.format_exc())
             return Response({
-                'error': f'상품명 조회 중 오류가 발생했습니다: {str(e)}',
+                'error': f'품목명칭 조회 중 오류가 발생했습니다: {str(e)}',
                 'products': [],
                 'count': 0,
                 'matched_by': matched_by or 'none'
-            }, status=status.HTTP_200_OK)  # 에러가 발생해도 빈 배열 반환
+            }, status=status.HTTP_200_OK)
         
     except Company.DoesNotExist:
         return Response({
@@ -4152,12 +3776,11 @@ def get_company_sales_data(request, company_id):
                     'error': '회사를 찾을 수 없습니다.'
                 }, status=status.HTTP_404_NOT_FOUND)
         
-        company_code_sap = company.company_code_sap
+        company_code_erp = company.company_code_erp
         
-        # company_code_sap가 없으면 빈 데이터 반환 (400 에러 대신)
-        if not company_code_sap:
+        # company_code_erp가 없으면 빈 데이터 반환 (400 에러 대신)
+        if not company_code_erp:
             # 최근 12개월 날짜 범위 계산
-            end_date = timezone.now().date()
             current_date = timezone.now()
             all_months = []
             for i in range(12):
@@ -4172,13 +3795,12 @@ def get_company_sales_data(request, company_id):
                 sales_chart_data.append({
                     'month': month,
                     '매출금액': 0,
-                    '매출이익': 0,
                     'GP': 0
                 })
             
             return Response({
                 'company_name': company.company_name,
-                'company_code_sap': None,
+                'company_code_erp': None,
                 'sales_chart_data': sales_chart_data,
                 'products_chart_data': [],
                 'total_records': 0
@@ -4199,7 +3821,7 @@ def get_company_sales_data(request, company_id):
         
         # SalesData에서 해당 회사코드와 일치하는 데이터 조회
         sales_data = SalesData.objects.filter(
-            코드=company_code_sap,
+            코드=company_code_erp,
             매출일자__gte=start_date,
             매출일자__lte=end_date
         ).order_by('매출일자')
@@ -4210,72 +3832,46 @@ def get_company_sales_data(request, company_id):
             monthly_sales[month] = {
                 'month': month,
                 '매출금액': 0,
-                '매출이익': 0,
                 'GP': 0
             }
         
         # 실제 데이터로 집계
         for data in sales_data:
             month_key = data.매출일자.strftime('%Y-%m')
-            
-            # 월별 매출 집계
             if month_key in monthly_sales:
                 monthly_sales[month_key]['매출금액'] += data.매출금액 or 0
-                monthly_sales[month_key]['매출이익'] += data.매출이익 or 0
-                
-                # 디버깅용 로그 (미트미 C0000020만)
-                if company_code_sap == 'C0000020' and month_key == '2024-06':
-                    print(f"[매출집계] {month_key}: 매출금액={data.매출금액}, 매출이익={data.매출이익}")
         
-        # 월별 축종별 중량 집계 (모든 달과 축종 조합 초기화)
+        # 월별 품목별 중량 집계
         monthly_products = {}
         all_products = set()
         
-        # 먼저 모든 축종 수집
         for data in sales_data:
-            if data.축종_부위:
-                all_products.add(data.축종_부위)
+            if data.품목약칭:
+                all_products.add(data.품목약칭)
         
-        # 모든 달과 축종 조합 초기화
         for month in all_months:
             for product in all_products:
                 product_key = f"{month}_{product}"
                 monthly_products[product_key] = {
                     'month': month,
-                    '축종_부위': product,
-                    '중량_Kg': 0
+                    '품목약칭': product,
+                    '중량': 0
                 }
         
-        # 실제 데이터로 집계
         for data in sales_data:
             month_key = data.매출일자.strftime('%Y-%m')
-            if data.축종_부위 and month_key in monthly_sales:
-                product_key = f"{month_key}_{data.축종_부위}"
+            if data.품목약칭 and month_key in monthly_sales:
+                product_key = f"{month_key}_{data.품목약칭}"
                 if product_key in monthly_products:
-                    monthly_products[product_key]['중량_Kg'] += data.중량_Kg or 0
+                    monthly_products[product_key]['중량'] += data.중량 or 0
         
-        # GP 계산 (매출이익/매출금액*100) - 소수점 첫째자리까지
-        for month_data in monthly_sales.values():
-            if month_data['매출금액'] > 0:
-                gp_value = (month_data['매출이익'] / month_data['매출금액']) * 100
-                # 소수점 첫째자리까지 반올림
-                month_data['GP'] = round(gp_value, 1)
-                print(f"[GP 계산] {month_data['month']}: 매출금액={month_data['매출금액']}, 매출이익={month_data['매출이익']}, GP={month_data['GP']}%")
-            else:
-                month_data['GP'] = 0  # 매출금액이 0이면 GP도 0
-                print(f"[GP 계산] {month_data['month']}: 매출금액=0, GP=0%")
-        
-        # 축종별 데이터를 월별로 그룹화하여 차트용 데이터 생성
-        # 이미 생성된 all_months와 all_products 사용
+        # 품목별 데이터를 월별로 그룹화
         products_chart_data = []
         for month in all_months:
             month_data = {'month': month}
             for product in all_products:
                 product_key = f"{month}_{product}"
-                if product_key in monthly_products:
-                    month_data[product] = monthly_products[product_key]['중량_Kg']
-                else:
-                    month_data[product] = 0
+                month_data[product] = monthly_products.get(product_key, {}).get('중량', 0)
             products_chart_data.append(month_data)
         
         # 최근 12개월 데이터 정렬
@@ -4283,7 +3879,7 @@ def get_company_sales_data(request, company_id):
         
         return Response({
             'company_name': company.company_name,
-            'company_code_sap': company_code_sap,
+            'company_code_erp': company_code_erp,
             'sales_chart_data': sales_chart_data,
             'products_chart_data': products_chart_data,
             'total_records': sales_data.count()

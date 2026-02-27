@@ -84,97 +84,83 @@ class Command(BaseCommand):
             
             for row_num, row in enumerate(reader, start=2):  # 헤더는 1번째 줄
                 try:
-                    # 날짜 필드 파싱
-                    established_date = None
-                    if row.get('설립일') and row['설립일'].strip():
+                    def _v(key, default=''):
+                        """행에서 안전하게 값 추출"""
+                        return row.get(key, default or '').strip() or None
+
+                    def _date(key):
+                        """날짜 파싱 (YYYY.MM.DD, YYYY-MM-DD 지원)"""
+                        raw = row.get(key, '').strip()
+                        if not raw or raw in ('0000.00.00', ''):
+                            return None
                         try:
-                            established_date = parse_date(row['설립일'].strip())
-                        except:
-                            pass
-                    
-                    code_create_date = None
-                    if row.get('코드생성일') and row['코드생성일'].strip():
+                            return parse_date(raw.replace('.', '-'))
+                        except Exception:
+                            return None
+
+                    def _int(key):
+                        """정수 파싱"""
+                        raw = row.get(key, '').strip()
+                        if not raw:
+                            return None
                         try:
-                            code_create_date = parse_date(row['코드생성일'].strip())
-                        except:
-                            pass
-                    
-                    transaction_start_date = None
-                    if row.get('거래시작일') and row['거래시작일'].strip():
-                        try:
-                            transaction_start_date = parse_date(row['거래시작일'].strip())
-                        except:
-                            pass
-                    
-                    # User 찾기 (employee_name으로)
-                    user = None
-                    if row.get('영업 사원') and row['영업 사원'].strip():
-                        employee_name = row['영업 사원'].strip()
-                        user = User.objects.filter(name=employee_name).first()
-                    
-                    # SAP코드여부 처리 (매입, 매출, 매입매출 또는 빈 값)
-                    sap_code_type_raw = row.get('SAP코드여부', '').strip()
-                    sap_code_type = None
-                    if sap_code_type_raw:
-                        # 유효한 값인지 확인: 매입, 매출, 매입매출 중 하나
-                        valid_values = ['매입', '매출', '매입매출']
-                        if sap_code_type_raw in valid_values:
-                            sap_code_type = sap_code_type_raw
-                        # 매입매출은 그대로 저장 (프론트엔드에서 두 체크박스 모두 체크로 처리)
-                    
-                    # 회사 코드가 없으면 스킵
-                    company_code = row.get('회사코드', '').strip()
+                            return int(float(raw.replace(',', '')))
+                        except Exception:
+                            return None
+
+                    # TSV 코드 컬럼 → company_code / company_code_erp
+                    company_code = _v('코드')
                     if not company_code:
-                        self.stdout.write(self.style.WARNING(f'라인 {row_num}: 회사코드가 없어 스킵합니다.'))
+                        self.stdout.write(self.style.WARNING(f'라인 {row_num}: 코드가 없어 스킵합니다.'))
                         error_count += 1
                         continue
-                    
-                    # 회사명이 없으면 스킵
-                    company_name = row.get('회사명', '').strip()
+
+                    company_name = _v('거래처명') or _v('거래처상호')
                     if not company_name:
-                        self.stdout.write(self.style.WARNING(f'라인 {row_num}: 회사명이 없어 스킵합니다.'))
+                        self.stdout.write(self.style.WARNING(f'라인 {row_num}: 거래처명이 없어 스킵합니다.'))
                         error_count += 1
                         continue
-                    
-                    # Company 생성
+
+                    # 매입/매출 Y/N 컬럼 → erp_code_type
+                    is_매입 = str(row.get('매입', '') or '').strip().upper() in ('Y', '예', '1', 'TRUE')
+                    is_매출 = str(row.get('매출', '') or '').strip().upper() in ('Y', '예', '1', 'TRUE')
+                    if is_매입 and is_매출:
+                        erp_code_type = '매입매출'
+                    elif is_매입:
+                        erp_code_type = '매입'
+                    elif is_매출:
+                        erp_code_type = '매출'
+                    else:
+                        erp_code_type = None
+
                     company = Company.objects.create(
                         company_code=company_code,
+                        company_code_erp=company_code,
                         company_name=company_name,
-                        customer_classification=row.get('고객분류', '').strip() or None,
-                        company_type=row.get('회사유형', '').strip() or None,
-                        tax_id=row.get('사업자등록번호', '').strip() or None,
-                        established_date=established_date,
-                        ceo_name=row.get('대표자명', '').strip() or None,
-                        head_address=row.get('본사 주소', '').strip() or None,
-                        city_district=row.get('시/구', '').strip() or None,
-                        processing_address=row.get('공장 주소', '').strip() or None,
-                        main_phone=row.get('대표전화', '').strip() or None,
-                        industry_name=row.get('업종명', '').strip() or None,
-                        products=row.get('주요제품', '').strip() or None,
-                        website=row.get('웹사이트', '').strip() or None,
-                        remarks=row.get('참고사항', '').strip() or None,
-                        sap_code_type=sap_code_type,
-                        company_code_sap=row.get('SAP거래처코드', '').strip() or None,
-                        biz_code=row.get('사업', '').strip() or None,
-                        biz_name=row.get('사업부', '').strip() or None,
-                        department_code=row.get('지점/팀', '').strip() or None,
-                        department=row.get('팀명', '').strip() or None,
-                        employee_number=row.get('사원번호', '').strip() or None,
-                        employee_name=row.get('영업 사원', '').strip() or None,
-                        distribution_type_sap_code=row.get('유통형태코드', '').strip() or None,
-                        distribution_type_sap=row.get('유통형태', '').strip() or None,
-                        contact_person=row.get('거래처 담당자', '').strip() or None,
-                        contact_phone=row.get('담당자 연락처', '').strip() or None,
-                        code_create_date=code_create_date,
-                        transaction_start_date=transaction_start_date,
-                        payment_terms=row.get('결제조건', '').strip() or None,
+                        tax_id=_v('사업자번호'),
+                        ceo_name=_v('대표자성명'),
+                        head_address=_v('본사주소'),
+                        main_phone=_v('본사전화번호'),
+                        industry_name=_v('업태') or _v('업종분류'),
+                        products=_v('주생산품목명'),
+                        remarks=_v('비고'),
+                        company_type=_v('개인법인구분'),
+                        payment_terms=_v('결재방법'),
+                        contact_person=_v('업체담당'),
+                        contact_phone=_v('담당자전화'),
+                        employee_name=_v('자사담당'),
+                        registration_date=_date('등록일자'),
+                        purchase_unit_price=_int('매입단가'),
+                        sale_unit_price=_int('매출단가'),
+                        erp_code_type=erp_code_type,
+                        customer_classification='신규',
                     )
-                    
+
                     created_count += 1
-                    
+
                     if created_count % 100 == 0:
                         self.stdout.write(f'진행 중... {created_count}개 회사 생성됨')
-                        
+
                 except Exception as e:
                     self.stdout.write(self.style.ERROR(f'라인 {row_num}: 오류 발생 - {str(e)}'))
                     error_count += 1

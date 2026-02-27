@@ -76,6 +76,8 @@ export type {
   CompanyFilters,
   CompanyFinancialStatus,
   PaginatedResponse,
+  ProspectCompany,
+  ProspectCompanyStats,
 };
 
 // API 호출 헬퍼 함수
@@ -322,7 +324,7 @@ export const companyApi = {
   // 회사 수정
   updateCompany: (companyCode: string, data: Partial<Company>): Promise<Company> => {
     return apiCall<Company>(`/companies/${companyCode}/`, {
-      method: 'PUT',
+      method: 'PATCH',
       body: JSON.stringify(data),
     });
   },
@@ -603,6 +605,21 @@ export const dashboardApi = {
     }>;
   }> => {
     return apiCall('/charts/dashboard/');
+  },
+};
+
+// 사용자 API
+export const usersApi = {
+  getUsers: async (): Promise<Array<{
+    id: number;
+    username: string;
+    name: string;
+    department: string;
+    employee_number: string;
+    role: string;
+    email: string;
+  }>> => {
+    return apiCall('/users/');
   },
 };
 

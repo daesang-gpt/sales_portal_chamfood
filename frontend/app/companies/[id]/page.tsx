@@ -122,8 +122,8 @@ export default function CompanyDetailPage() {
     return company.company_code || '-'
   }
 
-  const getCompanySapCode = (company: Company) => {
-    return company.company_code_sap || '-'
+  const getCompanyErpCode = (company: Company) => {
+    return company.company_code_erp || '-'
   }
 
   const getCompanyType = (company: Company) => {
@@ -419,36 +419,28 @@ export default function CompanyDetailPage() {
           </CardContent>
         </Card>
 
-        {/* SAP정보 */}
+        {/* ERP정보 */}
         <Card className="relative">
           <CardHeader>
             <CardTitle className="flex items-center space-x-2">
               <DollarSign className="h-5 w-5" />
-              <span>SAP정보</span>
+              <span>ERP정보</span>
             </CardTitle>
           </CardHeader>
-          {(!company.sap_code_type || company.sap_code_type === '-') ? (
+          {(!company.erp_code_type || company.erp_code_type === '-') ? (
             <div className="absolute inset-0 bg-gray-600/80 rounded-lg flex items-center justify-center z-10">
-              <p className="text-white text-lg font-medium">SAP 거래처 정보가 없습니다.</p>
+              <p className="text-white text-lg font-medium">ERP 거래처 정보가 없습니다.</p>
             </div>
           ) : null}
           <CardContent className="space-y-4 text-base text-gray-800">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <p className="text-sm font-medium text-muted-foreground">SAP코드여부</p>
-                <p className="text-lg">{company.sap_code_type || '-'}</p>
+                <p className="text-sm font-medium text-muted-foreground">ERP코드여부</p>
+                <p className="text-lg">{company.erp_code_type || '-'}</p>
               </div>
               <div>
-                <p className="text-sm font-medium text-muted-foreground">SAP거래처코드</p>
-                <p className="text-lg">{company.company_code_sap || '-'}</p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">사업부</p>
-                <p className="text-lg">{company.biz_name || '-'}</p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">팀명</p>
-                <p className="text-lg">{company.department || '-'}</p>
+                <p className="text-sm font-medium text-muted-foreground">ERP거래처코드</p>
+                <p className="text-lg">{company.company_code_erp || '-'}</p>
               </div>
               <div>
                 <p className="text-sm font-medium text-muted-foreground">영업 사원</p>
@@ -459,6 +451,14 @@ export default function CompanyDetailPage() {
                 <p className="text-lg">{company.distribution_type_sap || '-'}</p>
               </div>
               <div>
+                <p className="text-sm font-medium text-muted-foreground">매입단가</p>
+                <p className="text-lg">{company.purchase_unit_price != null ? company.purchase_unit_price.toLocaleString() + ' 원' : '-'}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">매출단가</p>
+                <p className="text-lg">{company.sale_unit_price != null ? company.sale_unit_price.toLocaleString() + ' 원' : '-'}</p>
+              </div>
+              <div>
                 <p className="text-sm font-medium text-muted-foreground">거래처 담당자</p>
                 <p className="text-lg">{company.contact_person || '-'}</p>
               </div>
@@ -467,8 +467,8 @@ export default function CompanyDetailPage() {
                 <p className="text-lg">{company.contact_phone || '-'}</p>
               </div>
               <div>
-                <p className="text-sm font-medium text-muted-foreground">코드생성일</p>
-                <p className="text-lg">{company.code_create_date || '-'}</p>
+                <p className="text-sm font-medium text-muted-foreground">등록일자</p>
+                <p className="text-lg">{company.registration_date || '-'}</p>
               </div>
               <div>
                 <p className="text-sm font-medium text-muted-foreground">거래시작일</p>
@@ -614,46 +614,28 @@ export default function CompanyDetailPage() {
                     tickFormatter={(value) => value.slice(5)} // YYYY-MM에서 MM만 표시
                   />
                   <YAxis 
-                    yAxisId="left"
-                    tickFormatter={(value) => `${(value / 1000).toFixed(0)}`}
-                    tickCount={6}
-                    style={{ fontSize: '11px', fill: '#666' }}
-                  />
-                  <YAxis 
-                    yAxisId="right" 
-                    orientation="right"
-                    tickFormatter={(value) => `${value}%`}
+                    tickFormatter={(value) => value.toLocaleString()}
                     tickCount={6}
                     style={{ fontSize: '11px', fill: '#666' }}
                   />
                   <Tooltip 
                     formatter={(value: number, name: string) => {
-                      if (name === 'GP') return [`${value}%`, name];
                       return [value.toLocaleString() + ' 원', name];
                     }}
                     labelFormatter={(label) => `${label}월`}
                     contentStyle={{ fontSize: '12px' }}
                   />
-                  <Bar dataKey="매출금액" fill="#4F9DDE" yAxisId="left" />
-                  <Bar dataKey="매출이익" fill="#82ca9d" yAxisId="left" />
-                  <Line 
-                    type="monotone" 
-                    dataKey="GP" 
-                    stroke="#ff7f0e" 
-                    strokeWidth={3}
-                    yAxisId="right"
-                    dot={{ fill: '#ff7f0e', strokeWidth: 2, r: 4 }}
-                  />
+                  <Bar dataKey="매출금액" fill="#4F9DDE" />
                 </ComposedChart>
               </ResponsiveContainer>
             </CardContent>
           </Card>
 
-          {/* 최근판매축종 그래프 */}
+          {/* 최근판매품목 그래프 */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>최근판매축종</CardTitle>
-              <span className="text-xs text-muted-foreground">최근 12개월 중량(톤)</span>
+              <CardTitle>최근판매품목</CardTitle>
+              <span className="text-xs text-muted-foreground">최근 12개월 수량</span>
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={300}>
@@ -664,12 +646,12 @@ export default function CompanyDetailPage() {
                     tickFormatter={(value) => value.slice(5)} // YYYY-MM에서 MM만 표시
                   />
                   <YAxis 
-                    tickFormatter={(value) => `${(value / 1000).toFixed(1)}톤`}
+                    tickFormatter={(value) => value.toLocaleString()}
                     tickCount={6}
                     style={{ fontSize: '11px', fill: '#666' }}
                   />
                   <Tooltip 
-                    formatter={(value: number, name: string) => [`${(value / 1000).toFixed(1)}톤`, name]}
+                    formatter={(value: number, name: string) => [value.toLocaleString(), name]}
                     labelFormatter={(label) => `${label}월`}
                     wrapperStyle={{ zIndex: 1000 }}
                     contentStyle={{ zIndex: 1000 }}
@@ -704,7 +686,7 @@ export default function CompanyDetailPage() {
           <CardContent className="flex items-center justify-center py-12">
             <div className="text-center">
               <p className="text-lg text-muted-foreground">최근 12개월 매출 데이터가 없습니다.</p>
-              <p className="text-sm text-muted-foreground mt-2">SAP 회사코드: {company?.company_code_sap || '없음'}</p>
+              <p className="text-sm text-muted-foreground mt-2">ERP 거래처코드: {company?.company_code_erp || '없음'}</p>
             </div>
           </CardContent>
         </Card>

@@ -90,7 +90,7 @@ export function Sidebar() {
       <div className="flex items-center justify-center h-16 bg-blue-600">
         <div className="flex items-center space-x-2">
           <Package className="h-8 w-8 text-white" />
-          <span className="text-xl font-bold text-white">축산물 영업포털</span>
+          <span className="text-xl font-bold text-white">참푸드 영업포털</span>
         </div>
       </div>
 

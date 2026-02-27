@@ -68,7 +68,15 @@ export default function LoginPage() {
       });
 
       if (!response.ok) {
-        setError('아이디 또는 비밀번호가 올바르지 않습니다.');
+        let message = '아이디 또는 비밀번호가 올바르지 않습니다.';
+        try {
+          const errData = await response.json();
+          if (errData?.message) message = errData.message;
+        } catch {
+          if (response.status >= 500) message = '서버 오류가 발생했습니다.';
+          else if (response.status === 0 || response.status === 404) message = '서버에 연결할 수 없습니다. 백엔드가 실행 중인지 확인하세요.';
+        }
+        setError(message);
         setIsLoading(false);
         return;
       }
@@ -98,6 +106,9 @@ export default function LoginPage() {
       router.push('/');
     } catch (err) {
       setError('서버 연결에 실패했습니다.');
+      if (process.env.NODE_ENV === 'development' && err instanceof Error) {
+        console.error('[Login]', err.message, err);
+      }
     } finally {
       setIsLoading(false);
     }

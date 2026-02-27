@@ -19,7 +19,7 @@ class OracleDateField(serializers.DateField):
 class CompanySerializer(serializers.ModelSerializer):
     # Oracle 호환성을 위해 DateField를 커스텀 필드로 교체
     established_date = OracleDateField(required=False, allow_null=True)
-    code_create_date = OracleDateField(required=False, allow_null=True)
+    registration_date = OracleDateField(required=False, allow_null=True)
     transaction_start_date = OracleDateField(required=False, allow_null=True)
     
     class Meta:
@@ -28,10 +28,11 @@ class CompanySerializer(serializers.ModelSerializer):
             'company_code', 'company_name', 'customer_classification', 'company_type',
             'tax_id', 'established_date', 'ceo_name', 'head_address', 'city_district',
             'processing_address', 'main_phone', 'industry_name', 'products', 'website',
-            'remarks', 'sap_code_type', 'company_code_sap', 'biz_code', 'biz_name',
-            'department_code', 'department', 'employee_number', 'employee_name',
+            'remarks', 'erp_code_type', 'company_code_erp', 'biz_code',
+            'department_code', 'employee_number', 'employee_name',
             'distribution_type_sap_code', 'distribution_type_sap', 'contact_person',
-            'contact_phone', 'code_create_date', 'transaction_start_date', 'payment_terms'
+            'contact_phone', 'registration_date', 'transaction_start_date', 'payment_terms',
+            'purchase_unit_price', 'sale_unit_price'
         ]
 
 class ReportSerializer(serializers.ModelSerializer):
@@ -412,7 +413,7 @@ class CompanyFinancialStatusSerializer(serializers.ModelSerializer):
     def get_company_code_sap(self, obj):
         try:
             if hasattr(obj, 'company') and obj.company:
-                return obj.company.company_code_sap
+                return obj.company.company_code_erp
             return None
         except Exception:
             return None
@@ -420,18 +421,16 @@ class CompanyFinancialStatusSerializer(serializers.ModelSerializer):
 class SalesDataSerializer(serializers.ModelSerializer):
     # Oracle 호환성을 위해 DateField를 커스텀 필드로 교체
     매출일자 = OracleDateField()
-    매입일자 = OracleDateField(required=False, allow_null=True)
     
     class Meta:
         model = SalesData
         fields = [
-            'id', '매출일자', '코드', '거래처명', '매출부서', '매출담당자', '유통형태', 
-            '상품코드', '상품명', '브랜드', '축종', '부위', '원산지', '축종_부위', 
-            '원산지_축종', '등급', 'Box', '중량_Kg', '매출단가', '매출금액', 
-            '매출이익', '이익율', '매입처', '매입일자', '재고보유일', '수입로컬', 
-            '이관재고여부', '담당자', '매입단가', '매입금액', '지점명', '매출비고', 
-            '매입비고', '이력번호', 'BL번호', 'created_at'
-        ] 
+            'id', '매출일자', '코드', '거래처명', '거래처약칭',
+            '품목코드', '품목약칭', '품목명칭', '단위', '규격',
+            '건수', '수량', '중량', '출고단가',
+            '공급가액', '부가세액', '매출금액',
+            '보관방법', '소비기간', 'created_at'
+        ]
         read_only_fields = ['id', 'created_at']
 
 class SafeIPAddressField(serializers.CharField):

@@ -17,22 +17,20 @@ export interface Company {
   products?: string;
   website?: string;
   remarks?: string;
-  // SAP정보
-  sap_code_type?: string;
-  company_code_sap?: string;
-  biz_code?: string;
-  biz_name?: string;
-  department_code?: string;
-  department?: string;
+  // ERP정보
+  erp_code_type?: string;
+  company_code_erp?: string;
   employee_number?: string;
   employee_name?: string;
   distribution_type_sap_code?: string;
   distribution_type_sap?: string;
   contact_person?: string;
   contact_phone?: string;
-  code_create_date?: string;
+  registration_date?: string;
   transaction_start_date?: string;
   payment_terms?: string;
+  purchase_unit_price?: number;
+  sale_unit_price?: number;
 }
 
 export interface CompanyFilters {
@@ -83,16 +81,14 @@ export interface CompanyUniqueProducts {
 // 회사 매출 데이터 타입
 export interface CompanySalesData {
   company_name: string;
-  company_code_sap: string;
+  company_code_erp: string;
   sales_chart_data: Array<{
     month: string;
     매출금액: number;
-    매출이익: number;
-    GP: number;
   }>;
   products_chart_data: Array<{
     month: string;
-    [key: string]: number | string; // 축종별 동적 키
+    [key: string]: number | string; // 품목별 동적 키
   }>;
   total_records: number;
 }
