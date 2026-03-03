@@ -39,7 +39,8 @@ CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOWED_ORIGINS = [
     'https://sales.chamfood.co.kr',
 ]
-
+# HTTPS 환경에서 로그인을 허용하기 위한 필수 설정
+CSRF_TRUSTED_ORIGINS = ['https://sales.chamfood.co.kr']
 # 보안 설정
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True

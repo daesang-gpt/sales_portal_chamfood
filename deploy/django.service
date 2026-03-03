@@ -1,6 +1,6 @@
 # Gunicorn systemd 서비스 파일
 # 설치 방법:
-#   sudo cp /home/ubuntu/sales-portal/deploy/django.service /etc/systemd/system/django.service
+#   sudo cp /home/ubuntu/sales_portal_chamfood/deploy/django.service /etc/systemd/system/django.service
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable django
 #   sudo systemctl start django
@@ -15,21 +15,21 @@ After=network.target
 [Service]
 User=ubuntu
 Group=ubuntu
-WorkingDirectory=/home/ubuntu/sales-portal/backend
-EnvironmentFile=/home/ubuntu/sales-portal/backend/.env
-ExecStart=/home/ubuntu/sales-portal/backend/venv/bin/gunicorn \
+WorkingDirectory=/home/ubuntu/sales_portal_chamfood/backend
+EnvironmentFile=/home/ubuntu/sales_portal_chamfood/backend/.env
+ExecStart=/home/ubuntu/sales_portal_chamfood/backend/venv/bin/gunicorn \
     --workers 3 \
     --bind 0.0.0.0:8000 \
     --timeout 120 \
-    --access-logfile /home/ubuntu/sales-portal/backend/logs/gunicorn_access.log \
-    --error-logfile /home/ubuntu/sales-portal/backend/logs/gunicorn_error.log \
+    --access-logfile /home/ubuntu/sales_portal_chamfood/backend/logs/gunicorn_access.log \
+    --error-logfile /home/ubuntu/sales_portal_chamfood/backend/logs/gunicorn_error.log \
     wsgi:application
 
 Restart=on-failure
 RestartSec=5s
 
-StandardOutput=append:/home/ubuntu/sales-portal/backend/logs/gunicorn_stdout.log
-StandardError=append:/home/ubuntu/sales-portal/backend/logs/gunicorn_stderr.log
+StandardOutput=append:/home/ubuntu/sales_portal_chamfood/backend/logs/gunicorn_stdout.log
+StandardError=append:/home/ubuntu/sales_portal_chamfood/backend/logs/gunicorn_stderr.log
 
 [Install]
 WantedBy=multi-user.target
