@@ -29,7 +29,7 @@ export default function UsersManagementPage() {
 
   useEffect(() => {
     if (!isAdminUser) {
-      router.push('/admin')
+      router.push('/manage')
       return
     }
 
@@ -100,7 +100,7 @@ export default function UsersManagementPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => router.push('/admin')}
+            onClick={() => router.push('/manage')}
           >
             <ArrowLeft className="mr-2 h-4 w-4" />
             관리자 대시보드로
@@ -217,4 +217,3 @@ export default function UsersManagementPage() {
     </div>
   )
 }
-

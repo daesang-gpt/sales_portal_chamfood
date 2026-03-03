@@ -241,7 +241,7 @@ export default function MyPage() {
                 <p className="text-sm text-muted-foreground">뷰어 권한은 작성 메뉴를 사용할 수 없습니다.</p>
               )}
               {user?.role === 'admin' && (
-                <Button variant="outline" className="w-full justify-start" onClick={() => router.push('/admin')}>
+                <Button variant="outline" className="w-full justify-start" onClick={() => router.push('/manage')}>
                   관리자 페이지
                 </Button>
               )}

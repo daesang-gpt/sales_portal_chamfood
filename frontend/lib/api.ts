@@ -468,6 +468,32 @@ export const companyApi = {
     return response.json();
   },
 
+  uploadCompaniesErpXls: async (file: File): Promise<{
+    message: string;
+    created_count: number;
+    updated_count: number;
+    errors: string[];
+  }> => {
+    const token = localStorage.getItem('access_token');
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch(`${API_BASE_URL}/import/companies-erp/`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: '업로드 실패' }));
+      throw new Error(errorData.error || '거래처현황 업로드에 실패했습니다.');
+    }
+
+    return response.json();
+  },
+
   uploadSalesDataCsv: async (file: File): Promise<{
     message: string;
     created_count: number;

@@ -150,11 +150,11 @@ export function Sidebar() {
              {isAdminUser && (
                <div className="flex items-center justify-center">
                  <button
-                   onClick={() => {
-                     if (typeof window !== 'undefined') {
-                       window.open('/admin', '_blank')
-                     }
-                   }}
+                  onClick={() => {
+                    if (typeof window !== 'undefined') {
+                      window.open('/manage', '_blank')
+                    }
+                  }}
                    className="flex items-center space-x-2 px-3 py-2 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
                    title="데이터베이스 관리"
                  >

@@ -35,19 +35,14 @@ export default function AdminPage() {
   };
 
   const uploadSalesData = () => {
-    console.log('업로드 함수 호출됨');
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.csv,.xlsx,.tsv';
+    input.accept = '.xls,.xlsx,.tsv,.csv';
     input.onchange = async (event) => {
       const file = (event.target as HTMLInputElement).files?.[0];
-      console.log('선택된 파일:', file);
       if (file) {
-        console.log('파일 업로드 시작:', file.name, file.size);
         try {
-          console.log('API 호출 시작');
           const result = await companyApi.uploadSalesDataCsv(file);
-          console.log('업로드 결과:', result);
           alert(`업로드 완료!\n신규 생성: ${result.created_count}건\n업데이트: ${result.updated_count}건\n\n총 오류: ${result.errors.length}개`);
           if (result.errors.length > 0) {
             console.log('업로드 오류:', result.errors);
@@ -56,8 +51,28 @@ export default function AdminPage() {
           console.error('업로드 오류:', error);
           alert(`업로드 실패: ${error.message}`);
         }
-      } else {
-        console.log('파일이 선택되지 않음');
+      }
+    };
+    input.click();
+  };
+
+  const uploadCompaniesErp = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.xls,.xlsx,.tsv';
+    input.onchange = async (event) => {
+      const file = (event.target as HTMLInputElement).files?.[0];
+      if (file) {
+        try {
+          const result = await companyApi.uploadCompaniesErpXls(file);
+          alert(`거래처현황 업로드 완료!\n신규 생성: ${result.created_count}건\n업데이트: ${result.updated_count}건\n\n총 오류: ${result.errors.length}개`);
+          if (result.errors.length > 0) {
+            console.log('업로드 오류:', result.errors);
+          }
+        } catch (error: any) {
+          console.error('업로드 오류:', error);
+          alert(`업로드 실패: ${error.message}`);
+        }
       }
     };
     input.click();
@@ -157,7 +172,7 @@ export default function AdminPage() {
             <CardContent>
               <Button 
                 className="w-full"
-                onClick={() => router.push('/admin/users')}
+                onClick={() => router.push('/manage/users')}
               >
                 사용자 목록 보기
               </Button>
@@ -172,7 +187,7 @@ export default function AdminPage() {
             <CardContent>
               <Button 
                 className="w-full"
-                onClick={() => router.push('/admin/audit-logs')}
+                onClick={() => router.push('/manage/audit-logs')}
               >
                 로그 조회
               </Button>
@@ -187,7 +202,7 @@ export default function AdminPage() {
             <CardContent>
               <Button 
                 className="w-full"
-                onClick={() => router.push('/admin/csv-management')}
+                onClick={() => router.push('/manage/csv-management')}
               >
                 CSV 관리
               </Button>
@@ -196,8 +211,8 @@ export default function AdminPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>매출 데이터 관리</CardTitle>
-              <CardDescription>실제 매출 데이터를 CSV/XLSX/TSV 파일로 업로드하고 대시보드 차트에 반영합니다.</CardDescription>
+              <CardTitle>매출현황 업로드</CardTitle>
+              <CardDescription>매출현황 파일(XLS)을 업로드하여 대시보드 차트에 반영합니다.</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
@@ -205,10 +220,30 @@ export default function AdminPage() {
                   className="w-full"
                   onClick={() => uploadSalesData()}
                 >
-                  매출 데이터 업로드 (CSV/XLSX/TSV)
+                  매출현황 업로드 (XLS)
                 </Button>
                 <p className="text-xs text-gray-500 text-center">
-                  필수 컬럼: 매출일자, 거래처명, 매출금액, 매출부서, 매출담당자 등
+                  매출현황.xls · 컬럼: 출하일자, 거래처명칭, 공급가액 등
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>거래처현황 업로드</CardTitle>
+              <CardDescription>거래처현황 파일(XLS)을 업로드하여 거래처를 일괄 등록/업데이트합니다.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                <Button 
+                  className="w-full"
+                  onClick={() => uploadCompaniesErp()}
+                >
+                  거래처현황 업로드 (XLS)
+                </Button>
+                <p className="text-xs text-gray-500 text-center">
+                  거래처현황.xls · 컬럼: 코드, 거래처명, 사업자번호 등
                 </p>
               </div>
             </CardContent>
@@ -237,4 +272,4 @@ export default function AdminPage() {
       </div>
     </div>
   );
-} 
+}

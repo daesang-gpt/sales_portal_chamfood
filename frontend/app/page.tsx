@@ -114,7 +114,7 @@ export default function Dashboard() {
               <span>{user.name} ({user.department})</span>
               {user.role === 'admin' && (
                 <Button variant="outline" size="sm" asChild>
-                  <Link href="/admin">관리자</Link>
+                  <Link href="/manage">관리자</Link>
                 </Button>
               )}
             </div>

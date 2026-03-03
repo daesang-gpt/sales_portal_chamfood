@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { ArrowLeft, Loader2, Search, Filter } from "lucide-react"
+import { ArrowLeft, Loader2, Filter } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { getUserFromToken, isAdmin } from "@/lib/auth"
 import { getApiBaseUrl } from "@/lib/api"
@@ -64,17 +64,15 @@ export default function AuditLogsPage() {
   const [totalCount, setTotalCount] = useState(0)
   const [pageSize] = useState(50)
   
-  // 필터 상태
   const [actionTypeFilter, setActionTypeFilter] = useState<string>('')
   const [startDate, setStartDate] = useState<string>('')
   const [endDate, setEndDate] = useState<string>('')
   
-  const currentUser = getUserFromToken()
   const isAdminUser = isAdmin()
 
   useEffect(() => {
     if (!isAdminUser) {
-      router.push('/admin')
+      router.push('/manage')
       return
     }
 
@@ -160,7 +158,7 @@ export default function AuditLogsPage() {
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => router.push('/admin')}
+              onClick={() => router.push('/manage')}
             >
               <ArrowLeft className="h-4 w-4" />
             </Button>
@@ -171,7 +169,6 @@ export default function AuditLogsPage() {
           </div>
         </div>
 
-        {/* 필터 섹션 */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -225,7 +222,6 @@ export default function AuditLogsPage() {
           </CardContent>
         </Card>
 
-        {/* 로그 테이블 */}
         <Card>
           <CardHeader>
             <CardTitle>로그 목록</CardTitle>
@@ -293,7 +289,6 @@ export default function AuditLogsPage() {
                   </Table>
                 </div>
 
-                {/* 페이지네이션 */}
                 {totalPages > 1 && (
                   <div className="flex items-center justify-between mt-4">
                     <div className="text-sm text-gray-600">
@@ -330,5 +325,3 @@ export default function AuditLogsPage() {
     </div>
   )
 }
-
-

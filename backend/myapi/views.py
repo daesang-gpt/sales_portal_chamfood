@@ -2526,7 +2526,7 @@ def upload_prospect_companies_csv(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def upload_companies_erp_tsv(request):
-    """ERP 거래처 정보 TSV 파일(거래처현황.tsv)을 업로드하여 기존 거래처 업데이트 또는 신규 거래처 추가"""
+    """거래처현황 파일(XLS/TSV)을 업로드하여 기존 거래처 업데이트 또는 신규 거래처 추가"""
     try:
         # 관리자 권한 확인
         if not hasattr(request.user, 'role') or request.user.role != 'admin':
@@ -2539,15 +2539,20 @@ def upload_companies_erp_tsv(request):
         
         # 파일 확장자 확인
         file_extension = tsv_file.name.lower().split('.')[-1]
-        if file_extension not in ['tsv']:
-            return Response({'error': 'TSV 파일만 업로드 가능합니다.'}, status=status.HTTP_400_BAD_REQUEST)
+        if file_extension not in ['tsv', 'xls', 'xlsx']:
+            return Response({'error': 'XLS, XLSX 또는 TSV 파일만 업로드 가능합니다.'}, status=status.HTTP_400_BAD_REQUEST)
         
-        # TSV 파일 읽기
+        # 파일 읽기
         try:
-            tsv_file.seek(0)
-            df = pd.read_csv(tsv_file, sep='\t', encoding='utf-8', keep_default_na=False, na_values=[''])
+            if file_extension == 'tsv':
+                tsv_file.seek(0)
+                df = pd.read_csv(tsv_file, sep='\t', encoding='utf-8', keep_default_na=False, na_values=[''])
+            elif file_extension == 'xls':
+                df = pd.read_excel(BytesIO(tsv_file.read()), engine='xlrd', keep_default_na=False, na_values=[''])
+            else:  # xlsx
+                df = pd.read_excel(BytesIO(tsv_file.read()), keep_default_na=False, na_values=[''])
         except Exception as e:
-            return Response({'error': f'TSV 파일 읽기 오류: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': f'파일 읽기 오류: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
         
         # 필수 컬럼 확인 (거래처현황.tsv 포맷)
         required_columns = ['코드', '거래처명']
@@ -2732,10 +2737,10 @@ def upload_sales_data_csv(request):
         
         # 파일 확장자 확인
         file_extension = csv_file.name.lower().split('.')[-1]
-        if file_extension not in ['csv', 'xlsx', 'tsv']:
-            return Response({'error': 'CSV, TSV 또는 XLSX 파일만 업로드 가능합니다.'}, status=status.HTTP_400_BAD_REQUEST)
+        if file_extension not in ['csv', 'xlsx', 'xls', 'tsv']:
+            return Response({'error': 'CSV, TSV, XLSX 또는 XLS 파일만 업로드 가능합니다.'}, status=status.HTTP_400_BAD_REQUEST)
         
-        # 파일 읽기 (CSV, TSV 또는 XLSX)
+        # 파일 읽기 (CSV, TSV, XLSX 또는 XLS)
         if file_extension == 'tsv':
             # TSV 파일 읽기
             csv_file.seek(0)  # 파일 포인터를 처음으로
@@ -2759,6 +2764,22 @@ def upload_sales_data_csv(request):
             csv_data = csv_file.read().decode('utf-8')
             # 두 번 이상 순회가 필요하므로 리스트로 변환
             csv_reader = [dict(row) for row in csv.DictReader(csv_data.splitlines())]
+        elif file_extension == 'xls':
+            # XLS(Excel 97-2003) 파일을 DataFrame으로 읽어서 dictionary 형태로 변환
+            try:
+                df = pd.read_excel(BytesIO(csv_file.read()), engine='xlrd')
+                csv_reader = []
+                for _, row in df.iterrows():
+                    dict_row = {}
+                    for col in df.columns:
+                        val = row[col]
+                        if pd.isna(val) or (isinstance(val, str) and val.lower() in ['nan', 'none', 'null']):
+                            dict_row[col] = ''
+                        else:
+                            dict_row[col] = str(val) if val is not None else ''
+                    csv_reader.append(dict_row)
+            except Exception as e:
+                return Response({'error': f'XLS 파일 읽기 오류: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
         else:  # xlsx
             # XLSX 파일을 DataFrame으로 읽어서 dictionary 형태로 변환
             try:
